@@ -1,0 +1,149 @@
+# Scenario 8: Full-Featured Production Cluster
+#
+# Description:
+#   Production-grade deployment combining all major ACKO features:
+#   ACL + Prometheus monitoring + multi-rack zones + persistent volumes +
+#   PodDisruptionBudget + dynamic config updates + Guaranteed QoS.
+#
+# Prerequisites:
+#   kubectl create namespace aerospike
+#   kubectl -n aerospike create secret generic aerospike-admin-secret --from-literal=password='admin123'
+#   Prometheus Operator installed (for ServiceMonitor/PrometheusRule)
+#   Nodes labeled with topology.kubernetes.io/zone for rack distribution
+#
+# Deploy:
+#   kubectl apply -f 08-full-featured.yaml
+#
+# Verify:
+#   kubectl get asc aerospike-full -n aerospike -w
+#   kubectl get pods -n aerospike -o wide
+#   kubectl get servicemonitor -n aerospike
+#   kubectl get pdb -n aerospike
+#
+apiVersion: acko.io/v1alpha1
+kind: AerospikeCluster
+metadata:
+  name: aerospike-full
+  namespace: aerospike
+spec:
+  size: 3                           # CE max: 8 nodes
+  image: aerospike:ce-8.1.1.1
+
+  # ----- Operator Behavior -----
+  paused: false                     # Set true to pause all reconciliation
+  rollingUpdateBatchSize: 1         # Restart N pods per rolling update batch (default: 1)
+  disablePDB: false                 # Auto-create PodDisruptionBudget (default: false)
+  enableDynamicConfigUpdate: true   # Apply config changes without pod restart when possible
+
+  # ----- Pod Resources (Guaranteed QoS) -----
+  podSpec:
+    aerospikeContainer:
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "2"
+        limits:
+          memory: "4Gi"             # requests == limits = Guaranteed QoS class
+          cpu: "2"
+
+  # ----- Multi-Rack / Zone Topology -----
+  rackConfig:
+    namespaces:
+      - production                  # Rack-aware replication for this namespace
+    racks:
+      - id: 1
+        zone: us-east1-a           # Pin rack-1 to zone A
+      - id: 2
+        zone: us-east1-b           # Pin rack-2 to zone B
+      - id: 3
+        zone: us-east1-c           # Pin rack-3 to zone C
+
+  # ----- Prometheus Monitoring -----
+  monitoring:
+    enabled: true                   # Inject exporter sidecar
+    exporterImage: aerospike/aerospike-prometheus-exporter:1.16.1
+    port: 9145
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+    metricLabels:
+      environment: production
+    serviceMonitor:
+      enabled: true                 # Create ServiceMonitor for Prometheus Operator
+      interval: 30s
+      labels:
+        release: prometheus
+    prometheusRule:
+      enabled: true                 # Create default PrometheusRule alerts
+      labels:
+        release: prometheus
+
+  # ----- Access Control (ACL) -----
+  aerospikeAccessControl:
+    roles:
+      - name: app-writer            # Custom role for application writes
+        privileges:
+          - read-write
+    users:
+      - name: admin                 # REQUIRED: user with sys-admin + user-admin
+        roles:
+          - sys-admin
+          - user-admin
+        secretName: aerospike-admin-secret
+
+  # ----- Storage -----
+  storage:
+    filesystemVolumePolicy:
+      initMethod: deleteFiles       # Clear files on initialization
+      cascadeDelete: true
+    volumes:
+      - name: data-vol
+        source:
+          persistentVolume:
+            storageClass: standard
+            size: 50Gi
+        aerospike:
+          path: /opt/aerospike/data
+        cascadeDelete: true         # PVC deleted when CR is deleted
+      - name: workdir
+        source:
+          emptyDir: {}              # Ephemeral work directory
+        aerospike:
+          path: /opt/aerospike/work
+
+  # ----- Aerospike Configuration -----
+  aerospikeConfig:
+    service:
+      cluster-name: aerospike-full
+      proto-fd-max: 15000
+
+    security:                       # Enable authentication + RBAC
+      enable-quotas: false
+
+    network:
+      service:
+        address: any
+        port: 3000
+      heartbeat:
+        mode: mesh
+        port: 3002
+      fabric:
+        address: any
+        port: 3001
+
+    namespaces:
+      - name: production
+        replication-factor: 2       # Replicas in different racks/zones
+        storage-engine:
+          type: device
+          file: /opt/aerospike/data/production.dat
+          filesize: 42949672960     # 40 GiB
+          data-in-memory: true      # Cache all data in RAM
+
+    logging:
+      - name: /var/log/aerospike/aerospike.log
+        context: any info

@@ -1,0 +1,52 @@
+# Scenario 1: Minimal 1-Node In-Memory Cluster (Dev/Test)
+#
+# Description:
+#   Simplest possible Aerospike CE deployment. Single node with in-memory
+#   storage. No persistence — all data is lost on pod restart.
+#   Ideal for local development, CI pipelines, and learning ACKO.
+#
+# Prerequisites:
+#   kubectl create namespace aerospike
+#
+# Deploy:
+#   kubectl apply -f 01-minimal.yaml
+#
+# Verify:
+#   kubectl get asc aerospike-basic -n aerospike -w
+#   kubectl exec -n aerospike aerospike-basic-0-0 -c aerospike-server -- asinfo -v status
+#
+apiVersion: acko.io/v1alpha1
+kind: AerospikeCluster
+metadata:
+  name: aerospike-basic
+  namespace: aerospike
+spec:
+  size: 1                          # Single node (CE max: 8)
+  image: aerospike:ce-8.1.1.1     # Aerospike Community Edition 8.1
+
+  aerospikeConfig:
+    service:
+      cluster-name: aerospike-basic   # Auto-set by webhook if omitted (matches CR name)
+      proto-fd-max: 15000             # Max client file descriptors (auto-set if omitted)
+
+    network:
+      service:
+        address: any                  # Listen on all interfaces
+        port: 3000                    # Client service port (auto-set if omitted)
+      heartbeat:
+        mode: mesh                    # Required for CE on Kubernetes (auto-set if omitted)
+        port: 3002                    # Heartbeat port (auto-set if omitted)
+      fabric:
+        address: any
+        port: 3001                    # Inter-node fabric port (auto-set if omitted)
+
+    namespaces:                       # CE max: 2 namespaces
+      - name: test
+        replication-factor: 1         # Must be 1 for single-node (cannot exceed spec.size)
+        storage-engine:
+          type: memory                # Pure in-memory; data lost on pod restart
+          data-size: 1073741824       # 1 GiB (must be integer bytes, min 512 MiB)
+
+    logging:
+      - name: /var/log/aerospike/aerospike.log
+        context: any info             # Log all contexts at info level

@@ -1,0 +1,143 @@
+# Scenario 6: Advanced Storage Configuration
+#
+# Description:
+#   Demonstrates all storage options: global volume policies, block devices,
+#   hostPath, CSI volumes, local PV with auto-cleanup, sidecar mounts,
+#   and per-volume override of init/wipe methods.
+#
+# Prerequisites:
+#   kubectl create namespace aerospike
+#   StorageClasses: standard, fast-ssd, csi-driver, local-path must exist
+#
+# Deploy:
+#   kubectl apply -f 06-storage-advanced.yaml
+#
+# Verify:
+#   kubectl get asc aerospike-storage-advanced -n aerospike -w
+#   kubectl get pvc -n aerospike -l aerospike.io/cr-name=aerospike-storage-advanced
+#
+apiVersion: acko.io/v1alpha1
+kind: AerospikeCluster
+metadata:
+  name: aerospike-storage-advanced
+  namespace: aerospike
+spec:
+  size: 3
+  image: aerospike:ce-8.1.1.1
+
+  storage:
+    # ----- Global Volume Policies -----
+    # Applied to all volumes unless overridden per-volume
+    filesystemVolumePolicy:
+      initMethod: deleteFiles       # Clear files on initialization
+      wipeMethod: deleteFiles       # Clear files on wipe
+      cascadeDelete: true           # Delete PVCs when CR is deleted
+    blockVolumePolicy:
+      initMethod: blkdiscard        # Fast block-level discard
+      wipeMethod: blkdiscardWithHeaderCleanup  # Discard + clean headers
+
+    # ----- Local Storage Auto-Cleanup -----
+    # PVCs using these StorageClasses are deleted before pod restart
+    localStorageClasses:
+      - local-path
+      - openebs-hostpath
+    deleteLocalStorageOnRestart: true
+
+    cleanupThreads: 2               # Parallel threads for volume cleanup operations
+
+    volumes:
+      # --- PVC with custom labels/annotations ---
+      - name: data-vol
+        source:
+          persistentVolume:
+            storageClass: standard
+            size: 50Gi
+            volumeMode: Filesystem
+            metadata:
+              labels:
+                app.kubernetes.io/data-tier: "aerospike"
+                backup-policy: "daily"
+              annotations:
+                volume.kubernetes.io/storage-provisioner: "ebs.csi.aws.com"
+        aerospike:
+          path: /opt/aerospike/data
+        initMethod: dd               # Per-volume override (overrides filesystemVolumePolicy)
+
+      # --- Block device volume ---
+      # Uses blockVolumePolicy defaults (blkdiscard / blkdiscardWithHeaderCleanup)
+      - name: sindex-vol
+        source:
+          persistentVolume:
+            storageClass: fast-ssd
+            size: 20Gi
+            volumeMode: Block         # Raw block device (not a filesystem)
+        aerospike:
+          path: /opt/aerospike/sindex
+
+      # --- Shared emptyDir with sidecar mount ---
+      - name: shared-data
+        source:
+          emptyDir: {}
+        aerospike:
+          path: /opt/aerospike/shared
+          readOnly: false
+          subPath: "aerospike-data"   # Mount a subdirectory of the volume
+        sidecars:
+          - containerName: aerospike-prometheus-exporter
+            path: /shared
+            readOnly: true            # Sidecar gets read-only access
+
+      # --- HostPath volume (dev/testing only, not portable) ---
+      - name: host-logs
+        source:
+          hostPath:
+            path: /var/log/aerospike
+            type: DirectoryOrCreate
+        aerospike:
+          path: /opt/aerospike/logs
+
+      # --- CSI volume with mount propagation ---
+      - name: csi-data
+        source:
+          persistentVolume:
+            storageClass: csi-driver
+            size: 100Gi
+        aerospike:
+          path: /opt/aerospike/csi
+          mountPropagation: HostToContainer
+
+      # --- Local PV (auto-deleted on restart via localStorageClasses) ---
+      - name: local-data
+        source:
+          persistentVolume:
+            storageClass: local-path
+            size: 10Gi
+        aerospike:
+          path: /opt/aerospike/local
+        initMethod: deleteFiles
+        wipeMethod: deleteFiles
+
+      # --- Volume with per-volume wipe override ---
+      - name: temp-data
+        source:
+          persistentVolume:
+            storageClass: standard
+            size: 5Gi
+        aerospike:
+          path: /opt/aerospike/temp
+        wipeMethod: headerCleanup
+        cascadeDelete: true
+
+  aerospikeConfig:
+    service:
+      cluster-name: storage-advanced-demo
+    namespaces:
+      - name: test
+        indexes-memory-budget: 1073741824  # 1 GiB index memory budget
+        replication-factor: 2
+        storage-engine:
+          type: device
+          devices:
+            - /opt/aerospike/data/test.dat
+          filesize: 4294967296       # 4 GiB
+          data-in-memory: true       # Cache all data in RAM for read performance

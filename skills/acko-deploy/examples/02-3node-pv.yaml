@@ -1,0 +1,84 @@
+# Scenario 2: 3-Node Cluster with Persistent Volume Storage
+#
+# Description:
+#   Production-baseline deployment with PersistentVolumeClaim-backed storage.
+#   Data survives pod restarts. Includes resource requests/limits for
+#   proper scheduling and QoS.
+#
+# Prerequisites:
+#   kubectl create namespace aerospike
+#   Ensure a StorageClass named "standard" exists (or change storageClass below)
+#
+# Deploy:
+#   kubectl apply -f 02-3node-pv.yaml
+#
+# Verify:
+#   kubectl get asc aerospike-3node -n aerospike -w
+#   kubectl get pvc -n aerospike -l aerospike.io/cr-name=aerospike-3node
+#
+apiVersion: acko.io/v1alpha1
+kind: AerospikeCluster
+metadata:
+  name: aerospike-3node
+  namespace: aerospike
+spec:
+  size: 3                           # 3 Aerospike server pods (CE max: 8)
+  image: aerospike:ce-8.1.1.1
+
+  podSpec:
+    aerospikeContainer:
+      resources:
+        requests:
+          memory: "2Gi"             # Guaranteed memory for pod scheduling
+          cpu: "1"                  # 1 CPU core requested
+        limits:
+          memory: "4Gi"             # Hard memory ceiling (OOMKill above this)
+          cpu: "2"                  # Hard CPU ceiling
+
+  storage:
+    volumes:
+      # Persistent data volume — survives pod restarts
+      - name: data-vol
+        source:
+          persistentVolume:
+            storageClass: standard  # Your cluster's StorageClass (e.g., gp3, standard, local-path)
+            size: 10Gi              # PVC size per pod
+            volumeMode: Filesystem  # Filesystem (default) or Block
+        aerospike:
+          path: /opt/aerospike/data # Mount path inside the Aerospike container
+        cascadeDelete: true         # PVCs automatically deleted when CR is deleted
+
+      # Ephemeral work directory — wiped on pod restart
+      - name: workdir
+        source:
+          emptyDir: {}              # Kubernetes emptyDir (ephemeral)
+        aerospike:
+          path: /opt/aerospike/work # Aerospike work directory
+
+  aerospikeConfig:
+    service:
+      cluster-name: aerospike-3node
+      proto-fd-max: 15000
+
+    network:
+      service:
+        address: any
+        port: 3000
+      heartbeat:
+        mode: mesh
+        port: 3002
+      fabric:
+        address: any
+        port: 3001
+
+    namespaces:
+      - name: testns
+        replication-factor: 2       # Each record stored on 2 of 3 nodes
+        storage-engine:
+          type: device              # Persistent storage (file-backed device)
+          file: /opt/aerospike/data/testns.dat   # Data file on the PV mount
+          filesize: 4294967296      # 4 GiB — max data file size (integer bytes)
+
+    logging:
+      - name: /var/log/aerospike/aerospike.log
+        context: any info

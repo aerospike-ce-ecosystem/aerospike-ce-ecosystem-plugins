@@ -1,0 +1,96 @@
+# Scenario 3: 3-Node Cluster with ACL (Access Control) Enabled
+#
+# Description:
+#   Cluster with authentication and role-based access control (RBAC).
+#   Requires an admin user with both sys-admin and user-admin roles.
+#   Passwords are stored in Kubernetes Secrets (key: "password").
+#
+# Prerequisites:
+#   kubectl create namespace aerospike
+#   kubectl -n aerospike create secret generic aerospike-admin-secret --from-literal=password='admin123'
+#   kubectl -n aerospike create secret generic aerospike-reader-secret --from-literal=password='reader123'
+#
+# Deploy:
+#   kubectl apply -f 03-acl.yaml
+#
+# Verify:
+#   kubectl get asc aerospike-acl -n aerospike -w
+#   kubectl exec -n aerospike aerospike-acl-0-0 -c aerospike-server -- \
+#     asinfo -v status -Uadmin -Padmin123
+#
+apiVersion: acko.io/v1alpha1
+kind: AerospikeCluster
+metadata:
+  name: aerospike-acl
+  namespace: aerospike
+spec:
+  size: 3
+  image: aerospike:ce-8.1.1.1
+
+  # ----- Access Control: roles and users managed declaratively by the operator -----
+  aerospikeAccessControl:
+    roles:
+      - name: reader                # Custom role: read-only access
+        privileges:
+          - read                    # Grants read across all namespaces
+          # Privilege formats: "<code>", "<code>.<namespace>", "<code>.<namespace>.<set>"
+      - name: writer                # Custom role: read-write access
+        privileges:
+          - read-write
+    users:
+      # REQUIRED: at least one user with BOTH sys-admin and user-admin roles
+      - name: admin
+        roles:
+          - sys-admin               # Built-in: full system administration
+          - user-admin              # Built-in: manage users and roles
+        secretName: aerospike-admin-secret   # K8s Secret with key "password"
+
+      - name: reader-user           # Application-level read-only user
+        roles:
+          - reader                  # References the custom role defined above
+        secretName: aerospike-reader-secret
+
+  # Valid privilege codes: read, write, read-write, read-write-udf,
+  #   sys-admin, user-admin, data-admin, truncate
+
+  storage:
+    volumes:
+      - name: data-vol
+        source:
+          persistentVolume:
+            storageClass: standard
+            size: 10Gi
+        aerospike:
+          path: /opt/aerospike/data
+        cascadeDelete: true
+
+  aerospikeConfig:
+    service:
+      cluster-name: aerospike-acl
+      proto-fd-max: 15000
+
+    security:                       # Enables authentication and RBAC
+      enable-quotas: false          # Disable rate/quota enforcement (optional)
+
+    network:
+      service:
+        address: any
+        port: 3000
+      heartbeat:
+        mode: mesh
+        port: 3002
+      fabric:
+        address: any
+        port: 3001
+
+    namespaces:
+      - name: testns
+        replication-factor: 2
+        storage-engine:
+          type: device
+          file: /opt/aerospike/data/testns.dat
+          filesize: 4294967296      # 4 GiB
+
+    logging:
+      - name: /var/log/aerospike/aerospike.log
+        context: any info

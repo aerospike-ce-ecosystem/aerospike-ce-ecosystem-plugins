@@ -1,0 +1,75 @@
+# Scenario 4: 3-Node Cluster with Prometheus Monitoring
+#
+# Description:
+#   Cluster with Prometheus exporter sidecar, ServiceMonitor for auto-discovery,
+#   and PrometheusRule for default alerts. Requires Prometheus Operator
+#   (kube-prometheus-stack) installed in the cluster.
+#
+# Prerequisites:
+#   kubectl create namespace aerospike
+#   Prometheus Operator installed (with ServiceMonitor and PrometheusRule CRDs)
+#
+# Deploy:
+#   kubectl apply -f 04-monitoring.yaml
+#
+# Verify:
+#   kubectl get asc aerospike-monitoring -n aerospike -w
+#   kubectl get servicemonitor -n aerospike
+#   kubectl get prometheusrule -n aerospike
+#   # Check exporter metrics:
+#   kubectl port-forward -n aerospike aerospike-monitoring-0-0 9145:9145
+#   curl http://localhost:9145/metrics
+#
+apiVersion: acko.io/v1alpha1
+kind: AerospikeCluster
+metadata:
+  name: aerospike-monitoring
+  namespace: aerospike
+spec:
+  size: 3
+  image: aerospike:ce-8.1.1.1
+
+  monitoring:
+    enabled: true                   # Inject Prometheus exporter as a sidecar container
+    exporterImage: aerospike/aerospike-prometheus-exporter:1.16.1  # Auto-set if omitted
+    port: 9145                      # Exporter metrics port (auto-set to 9145 if omitted)
+    resources:                      # Resource limits for the exporter sidecar
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+    env:                            # Environment variables for the exporter
+      - name: AS_STAT_NAMESPACES    # Restrict stats collection to specific namespaces
+        value: "test"
+    metricLabels:                   # Custom labels added to all exported metrics
+      environment: production
+      team: platform
+    serviceMonitor:
+      enabled: true                 # Create a Prometheus Operator ServiceMonitor
+      interval: 30s                 # Scrape interval
+      labels:
+        release: prometheus         # Label for Prometheus to discover this ServiceMonitor
+    prometheusRule:
+      enabled: true                 # Create default PrometheusRule alert definitions
+      labels:
+        release: prometheus         # Label for Prometheus to discover this PrometheusRule
+
+  aerospikeConfig:
+    namespaces:
+      - name: test
+        replication-factor: 2
+        storage-engine:
+          type: memory
+          data-size: 2147483648     # 2 GiB
+
+  storage:
+    volumes:
+      - name: workdir
+        source:
+          persistentVolume:
+            storageClass: standard
+            size: 10Gi
+        aerospike:
+          path: /opt/aerospike

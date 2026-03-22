@@ -1,0 +1,41 @@
+{
+  "skill_name": "aerospike-ce-ecosystem",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "kind cluster에 개발용 1노드 Aerospike 클러스터를 배포해줘",
+      "expected_output": "kubectl get asc에서 phase=Completed, pod 1개 Running",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "3노드 Aerospike 클러스터를 persistent storage와 함께 aerospike 네임스페이스에 배포해줘",
+      "expected_output": "3개 pod Running, PVC bound, phase=Completed",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Aerospike 클러스터를 1노드에서 3노드로 스케일업하고, proto-fd-max를 20000으로 동적 변경해줘",
+      "expected_output": "scale 완료, dynamic config 적용",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Aerospike에 연결하여 사용자 레코드를 CRUD하는 FastAPI 앱을 만들어줘. localhost:3000에 연결해",
+      "expected_output": "앱이 시작되고, curl로 CRUD 동작",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "FastAPI 앱에 batch read 엔드포인트, expression filter 엔드포인트, Prometheus 메트릭을 추가해줘",
+      "expected_output": "모든 엔드포인트 동작, /metrics 노출",
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "FastAPI 앱에 적절한 에러 핸들링을 추가해줘: 404 for not found, 409 for duplicates, 503 for connection issues",
+      "expected_output": "올바른 HTTP 상태 코드 반환",
+      "files": []
+    }
+  ]
+}

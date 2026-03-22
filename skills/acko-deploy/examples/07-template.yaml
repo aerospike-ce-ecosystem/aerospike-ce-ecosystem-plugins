@@ -1,0 +1,132 @@
+# Scenario 7: Template-Based Deployment
+#
+# Description:
+#   Uses AerospikeClusterTemplate to define shared configuration for multiple
+#   clusters. The AerospikeCluster references the template and can selectively
+#   override specific fields. Template snapshot is copied at creation time;
+#   use the resync annotation to pull in template changes later.
+#
+# Prerequisites:
+#   kubectl create namespace default   # (or your target namespace)
+#
+# Deploy (apply template first, then cluster):
+#   kubectl apply -f 07-template.yaml
+#
+# Resync after template changes:
+#   kubectl annotate aerospikecluster prod-cluster acko.io/resync-template=true
+#
+# Verify:
+#   kubectl get asc prod-cluster -w
+#   kubectl get asc prod-cluster -o jsonpath='{.status.templateSnapshot.synced}'
+#
+---
+# [1] AerospikeClusterTemplate — shared production configuration
+apiVersion: acko.io/v1alpha1
+kind: AerospikeClusterTemplate
+metadata:
+  name: hard-rack
+  namespace: default
+  labels:
+    app.kubernetes.io/profile: hard-rack
+spec:
+  image: aerospike:ce-8.1.1.1
+  size: 6                           # Default cluster size (can be overridden)
+
+  monitoring:
+    enabled: true
+    port: 9145
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+
+  aerospikeNetworkPolicy:
+    accessType: pod                  # pod | hostInternal | hostExternal | configuredIP
+    alternateAccessType: pod
+    fabricType: pod
+
+  scheduling:
+    podAntiAffinityLevel: required   # Hard anti-affinity: one pod per node
+    tolerations:
+      - key: "aerospike"
+        operator: "Exists"
+        effect: "NoSchedule"
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: "aerospike"
+                operator: In
+                values:
+                  - "true"
+
+  storage:
+    storageClassName: local-path
+    localPVRequired: true
+    resources:
+      requests:
+        storage: 100Gi
+
+  resources:
+    requests:
+      cpu: "2"
+      memory: "4Gi"
+    limits:
+      cpu: "2"                      # Guaranteed QoS: requests == limits
+      memory: "4Gi"
+
+  rackConfig:
+    maxRacksPerNode: 1
+
+  aerospikeConfig:
+    service:
+      proto-fd-max: 15000
+    namespaceDefaults:
+      data-size: 2147483648          # 2 GiB default for all namespaces
+      replication-factor: 2
+    network:
+      heartbeat:
+        mode: mesh
+        interval: 150
+        timeout: 10
+
+---
+# [2] AerospikeCluster — references the template with selective overrides
+apiVersion: acko.io/v1alpha1
+kind: AerospikeCluster
+metadata:
+  name: prod-cluster
+  namespace: default
+spec:
+  size: 3                           # Override template's size (6 -> 3)
+  image: aerospike:ce-8.1.1.1
+
+  templateRef:
+    name: hard-rack                 # Template snapshot copied at creation time
+
+  # Override only what differs from the template
+  overrides:
+    resources:
+      requests:
+        cpu: "1"
+        memory: "2Gi"
+      limits:
+        cpu: "2"
+        memory: "2Gi"
+
+  aerospikeConfig:
+    namespaces:
+      - name: data
+        storage-engine:
+          type: memory
+          data-size: 1073741824     # 1 GiB — overrides template namespaceDefaults
+
+# To resync after template changes:
+#   kubectl annotate aerospikecluster prod-cluster acko.io/resync-template=true
+# The annotation is automatically removed after resync completes.
