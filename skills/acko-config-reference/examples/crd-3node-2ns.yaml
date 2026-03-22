@@ -1,0 +1,51 @@
+apiVersion: acko.io/v1alpha1
+kind: AerospikeCluster
+metadata:
+  name: aerospike-cluster
+  namespace: aerospike
+spec:
+  size: 3
+  image: aerospike:ce-8.1.1.1
+
+  aerospikeConfig:
+    service:
+      cluster-name: aerospike-cluster
+      proto-fd-max: 15000
+    network:
+      service:
+        address: any
+        port: 3000
+      heartbeat:
+        mode: mesh
+        port: 3002
+      fabric:
+        address: any
+        port: 3001
+    namespaces:
+      - name: cache
+        replication-factor: 2
+        storage-engine:
+          type: memory
+          data-size: 4294967296          # 4 GiB
+      - name: data
+        replication-factor: 2
+        storage-engine:
+          type: device
+          file: /opt/aerospike/data/data.dat
+          filesize: 17179869184          # 16 GiB
+          flush-size: 1048576            # 1 MiB
+    logging:
+      - name: /var/log/aerospike/aerospike.log
+        context: any info
+
+  storage:
+    volumes:
+      - name: data-vol
+        source:
+          persistentVolume:
+            storageClass: standard
+            size: 20Gi                   # K8s quantity string (NOT integer bytes)
+            volumeMode: Filesystem
+        aerospike:
+          path: /opt/aerospike/data
+        cascadeDelete: true

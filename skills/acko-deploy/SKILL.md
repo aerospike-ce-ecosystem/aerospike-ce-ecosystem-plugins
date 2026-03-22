@@ -146,82 +146,13 @@ Choose the scenario that matches your needs. Each links to a ready-to-use YAML e
 
 ## 4. CR Spec Reference
 
-### Top-Level Fields
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `spec.size` | int | Yes | Number of Aerospike server pods (CE: 1-8) |
-| `spec.image` | string | Yes | Aerospike CE container image (e.g., `aerospike:ce-8.1.1.1`) |
-| `spec.paused` | bool | No | Set `true` to pause all reconciliation |
-| `spec.enableDynamicConfigUpdate` | bool | No | Apply config changes without pod restart |
-| `spec.rollingUpdateBatchSize` | int/string | No | Pods to restart per batch (default: 1, or "25%") |
-| `spec.disablePDB` | bool | No | Set `true` to skip PodDisruptionBudget creation |
-| `spec.maxUnavailable` | int/string | No | PDB maxUnavailable value (default: 1) |
-| `spec.templateRef.name` | string | No | Reference an AerospikeClusterTemplate |
-| `spec.overrides` | object | No | Override template fields (only with templateRef) |
-| `spec.operations` | list | No | On-demand operations (WarmRestart, PodRestart) |
-
-### aerospikeConfig Section
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `service.cluster-name` | string | Cluster name (auto-set to CR name if omitted) |
-| `service.proto-fd-max` | int | Max client connections (auto-set to 15000 if omitted) |
-| `network.service.port` | int | Service port (auto-set to 3000 if omitted) |
-| `network.heartbeat.mode` | string | Must be `mesh` for CE on K8s (auto-set if omitted) |
-| `network.heartbeat.port` | int | Heartbeat port (auto-set to 3002 if omitted) |
-| `network.fabric.port` | int | Fabric port (auto-set to 3001 if omitted) |
-| `namespaces` | list | Namespace definitions (CE: max 2) |
-| `namespaces[].storage-engine.type` | string | `memory` or `device` |
-| `namespaces[].storage-engine.data-size` | int | Memory size in bytes (for type: memory) |
-| `namespaces[].storage-engine.filesize` | int | Data file size in bytes (for type: device) |
-| `security` | object | Enable ACL (requires aerospikeAccessControl) |
-| `logging` | list | Log file paths and context levels |
-
-### Storage Section
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `storage.volumes[]` | list | Volume definitions |
-| `storage.volumes[].name` | string | Unique volume name |
-| `storage.volumes[].source.persistentVolume` | object | PVC-backed volume |
-| `storage.volumes[].source.emptyDir` | object | Ephemeral volume |
-| `storage.volumes[].source.hostPath` | object | Host path volume (dev only) |
-| `storage.volumes[].aerospike.path` | string | Absolute mount path in container |
-| `storage.volumes[].cascadeDelete` | bool | Delete PVC when CR is deleted |
-| `storage.filesystemVolumePolicy` | object | Global policy for filesystem volumes |
-| `storage.blockVolumePolicy` | object | Global policy for block volumes |
-
-### Other Sections
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `podSpec.aerospikeContainer.resources` | object | CPU/memory requests and limits |
-| `rackConfig.racks[]` | list | Rack definitions with zone/node affinity |
-| `rackConfig.namespaces` | list | Namespaces using rack-aware replication |
-| `monitoring.enabled` | bool | Inject Prometheus exporter sidecar |
-| `monitoring.serviceMonitor.enabled` | bool | Create ServiceMonitor for Prometheus Operator |
-| `aerospikeAccessControl` | object | Roles and users for ACL |
-| `aerospikeNetworkPolicy` | object | Access type configuration (pod/hostInternal/hostExternal) |
+Detail: `./reference/cr-spec-fields.md`
 
 ---
 
 ## 5. Webhook Auto-Settings
 
-The ACKO webhook automatically sets these fields if you omit them. You do not need to specify them unless you want non-default values.
-
-| Field | Auto-Set Value |
-|-------|---------------|
-| `service.cluster-name` | CR metadata.name |
-| `service.proto-fd-max` | 15000 |
-| `network.service.port` | 3000 |
-| `network.fabric.port` | 3001 |
-| `network.heartbeat.port` | 3002 |
-| `network.heartbeat.mode` | mesh |
-| `monitoring.exporterImage` | `aerospike/aerospike-prometheus-exporter:1.16.1` |
-| `monitoring.port` | 9145 |
-| `mesh-seed-address-port` | All pod FQDNs (auto-injected) |
-| `access-address` | Based on aerospikeNetworkPolicy (pod/node IP) |
+Webhook auto-settings and CRD field mapping: See acko-config-reference skill's `reference/crd-mapping.md`
 
 ---
 
@@ -265,36 +196,10 @@ kubectl exec -n aerospike <pod-name> -c aerospike-server -- asinfo -v 'namespace
 
 ## 7. Byte Value Reference
 
-All size values in `aerospikeConfig` must be specified as integer byte counts. Use this table for conversion.
-
-| Human-Readable | Bytes (Integer Value) |
-|----------------|----------------------|
-| 512 MiB | `536870912` |
-| 1 GiB | `1073741824` |
-| 2 GiB | `2147483648` |
-| 4 GiB | `4294967296` |
-| 8 GiB | `8589934592` |
-| 16 GiB | `17179869184` |
-| 32 GiB | `34359738368` |
-| 40 GiB | `42949672960` |
-| 50 GiB | `53687091200` |
-| 64 GiB | `68719476736` |
-| 100 GiB | `107374182400` |
-| 128 KiB | `131072` |
-| 1 MiB | `1048576` |
-
-**Formula**: GiB value * 1073741824 = bytes. MiB value * 1048576 = bytes.
-
-**Important**: The minimum `data-size` for a memory storage engine is 512 MiB (`536870912` bytes), calculated as 8 stripes * 8 write-blocks * 8 MiB.
+Byte values: See acko-config-reference skill's `reference/byte-values.md`
 
 ---
 
 ## 8. CE 8.1 Configuration Notes
 
-When writing `aerospikeConfig` for CE 8.1, be aware of these breaking changes from older versions:
-
-- **No `info` port block**: Do not include `network.info`. Use `network.admin` with port 3008 if needed. Including `info` causes a server parse error and pod crash.
-- **Use `data-size` not `memory-size`**: For `storage-engine.type: memory`, use `data-size` (integer bytes). The old `memory-size` is removed in 8.x.
-- **Use `flush-size` not `write-block-size`**: For `storage-engine.type: device`, use `flush-size`. Default is 1 MiB. For NVMe, 128 KiB is recommended.
-- **`stop-writes-sys-memory-pct`**: Replaces the old `stop-writes-pct`. Default is 90.
-- **`nsup-period` and `default-ttl`**: If `default-ttl` is non-zero, `nsup-period` must also be non-zero, or the server fails to start.
+CE 8.1 notes: See acko-config-reference skill
