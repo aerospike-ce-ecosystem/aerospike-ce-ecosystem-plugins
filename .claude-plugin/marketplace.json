@@ -1,0 +1,15 @@
+{
+  "name": "aerospike-ce-ecosystem",
+  "owner": {
+    "name": "Aerospike CE Ecosystem",
+    "email": "seonkyu.rhim@aerospike.com"
+  },
+  "plugins": [
+    {
+      "name": "aerospike-ce-ecosystem",
+      "description": "Aerospike CE ecosystem tools: deploy clusters on Kubernetes with ACKO, build Python apps with aerospike-py",
+      "source": "./",
+      "category": "development"
+    }
+  ]
+}
