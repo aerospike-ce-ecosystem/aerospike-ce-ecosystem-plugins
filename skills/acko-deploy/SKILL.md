@@ -31,7 +31,7 @@ kubectl create namespace aerospike --dry-run=client -o yaml | kubectl apply -f -
 
 If the operator is not running, install it first:
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/aerospike/aerospike-ce-kubernetes-operator/main/config/deploy/operator.yaml
+kubectl apply -f https://raw.githubusercontent.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/main/config/deploy/operator.yaml
 ```
 
 ### Step 2: Apply the Minimal CR

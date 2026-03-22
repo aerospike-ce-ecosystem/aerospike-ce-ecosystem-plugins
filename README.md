@@ -1,6 +1,6 @@
 # aerospike-ce-ecosystem
 
-Claude Code plugin for the Aerospike CE ecosystem — deploy clusters on Kubernetes with [ACKO](https://github.com/aerospike/aerospike-ce-kubernetes-operator) and build Python applications with [aerospike-py](https://github.com/aerospike/aerospike-py).
+Claude Code plugin for the Aerospike CE ecosystem — deploy clusters on Kubernetes with [ACKO](https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator) and build Python applications with [aerospike-py](https://github.com/aerospike-ce-ecosystem/aerospike-py).
 
 ## Installation
 
@@ -10,7 +10,7 @@ Add the repository as a marketplace, then install:
 
 ```bash
 # Step 1: Add as marketplace
-claude plugin marketplace add KimSoungRyoul/aerospike-ce-ecosystem-plugins
+claude plugin marketplace add aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins
 
 # Step 2: Install the plugin
 claude plugin install aerospike-ce-ecosystem
@@ -21,7 +21,7 @@ claude plugin install aerospike-ce-ecosystem
 To install only for the current project:
 
 ```bash
-claude plugin marketplace add KimSoungRyoul/aerospike-ce-ecosystem-plugins
+claude plugin marketplace add aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins
 claude plugin install aerospike-ce-ecosystem -s project
 ```
 
@@ -60,7 +60,7 @@ claude plugin list
 ### For ACKO skills
 
 - Kubernetes cluster (kind, minikube, EKS, GKE, etc.)
-- [ACKO operator](https://github.com/aerospike/aerospike-ce-kubernetes-operator) installed
+- [ACKO operator](https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator) installed
 - `kubectl` configured
 
 ### For aerospike-py skills
