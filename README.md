@@ -9,17 +9,11 @@ Claude Code plugin for the Aerospike CE ecosystem — deploy clusters on Kuberne
 Add the repository as a marketplace, then install:
 
 ```bash
-# Add as marketplace
-claude plugin marketplace add aerospike/aerospike-ce-ecosystem-plugins
+# Step 1: Add as marketplace
+claude plugin marketplace add KimSoungRyoul/aerospike-ce-ecosystem-plugins
 
-# Install the plugin
+# Step 2: Install the plugin
 claude plugin install aerospike-ce-ecosystem
-```
-
-### Direct install from GitHub URL
-
-```bash
-claude plugin install aerospike/aerospike-ce-ecosystem-plugins
 ```
 
 ### Project-scoped install
@@ -27,7 +21,15 @@ claude plugin install aerospike/aerospike-ce-ecosystem-plugins
 To install only for the current project:
 
 ```bash
+claude plugin marketplace add KimSoungRyoul/aerospike-ce-ecosystem-plugins
 claude plugin install aerospike-ce-ecosystem -s project
+```
+
+### Verify installation
+
+```bash
+claude plugin list
+# Should show: aerospike-ce-ecosystem@aerospike-ce-ecosystem ✔ enabled
 ```
 
 ## Skills
