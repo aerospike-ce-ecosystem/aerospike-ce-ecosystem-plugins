@@ -91,6 +91,8 @@ Operation-level metrics collected in Rust and exposed in Prometheus text format.
 | start_metrics_server(port=9464) | Start background HTTP server at `/metrics` |
 | get_metrics() -> str | Get current metrics in Prometheus text format |
 | stop_metrics_server() | Stop the metrics server |
+| set_metrics_enabled(enabled: bool) | Enable/disable metrics collection. Useful for benchmarking without overhead. |
+| is_metrics_enabled() -> bool | Check if metrics collection is currently enabled |
 
 ```python
 import aerospike_py

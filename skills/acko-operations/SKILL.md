@@ -471,6 +471,6 @@ Detail: `./reference/diagnostic-commands.md`
 ## Reference Documents
 
 - [Operations Reference](./reference/operations.md) -- Detailed Day-2 operations with all kubectl commands
-- [Events Reference](./reference/events.md) -- All 31 Kubernetes events emitted by ACKO
+- [Events Reference](./reference/events.md) -- All 37 Kubernetes events emitted by ACKO
 - [Troubleshooting Reference](./reference/troubleshooting.md) -- Symptom-based diagnostic table with commands
 - [Validation Rules Reference](./reference/validation-rules.md) -- 53 webhook errors + 15 warnings

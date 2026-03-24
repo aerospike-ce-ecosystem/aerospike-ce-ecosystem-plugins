@@ -1,6 +1,6 @@
 # Kubernetes Events Reference
 
-Complete list of all 31 Kubernetes events emitted by the ACKO operator.
+Complete list of all 37 Kubernetes events emitted by the ACKO operator.
 
 ---
 
