@@ -173,6 +173,17 @@ Notes:
 
 ---
 
+## Cluster Topology
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| get_node_names | () -> list[str] | Return node name list. **Sync on both Client and AsyncClient** (lock-free, no I/O). |
+
+```python
+nodes = client.get_node_names()          # sync client
+nodes = async_client.get_node_names()    # async client — NOT awaitable, always sync
+```
+
 ## Info & Truncate
 
 | Method | Signature | Description |
@@ -342,6 +353,7 @@ All exceptions are importable from `aerospike_py` or `aerospike_py.exception`.
 ```
 AerospikeError
 +-- ClientError
+|   +-- BackpressureError
 +-- ClusterError
 +-- InvalidArgError
 +-- AerospikeTimeoutError

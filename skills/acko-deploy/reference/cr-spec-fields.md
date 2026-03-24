@@ -18,6 +18,8 @@ Complete field reference for the AerospikeCluster Custom Resource.
 | `spec.templateRef.name` | string | No | Reference an AerospikeClusterTemplate |
 | `spec.overrides` | object | No | Override template fields (only with templateRef) |
 | `spec.operations` | list | No | On-demand operations (WarmRestart, PodRestart) |
+| `spec.k8sNodeBlockList` | list[string] | No | Block scheduling on specific K8s nodes (for node drain) |
+| `spec.seedsFinderServices.loadBalancer` | object | No | Create LoadBalancer Service for external seed discovery |
 
 ## aerospikeConfig Section
 
@@ -55,9 +57,15 @@ Complete field reference for the AerospikeCluster Custom Resource.
 | Field | Type | Description |
 |-------|------|-------------|
 | `podSpec.aerospikeContainer.resources` | object | CPU/memory requests and limits |
+| `podSpec.aerospikeContainer.securityContext` | object | Container-level security context (runAsUser, runAsGroup, privileged, readOnlyRootFilesystem, allowPrivilegeEscalation, runAsNonRoot) |
+| `podSpec.readinessGateEnabled` | bool | Enable custom readiness gate `acko.io/aerospike-ready` (triggers rolling restart when toggled) |
 | `rackConfig.racks[]` | list | Rack definitions with zone/node affinity |
+| `rackConfig.racks[].revision` | string | Per-rack revision string; changing triggers rack-specific rolling restart |
 | `rackConfig.namespaces` | list | Namespaces using rack-aware replication |
 | `monitoring.enabled` | bool | Inject Prometheus exporter sidecar |
 | `monitoring.serviceMonitor.enabled` | bool | Create ServiceMonitor for Prometheus Operator |
+| `monitoring.env` | list[EnvVar] | Custom environment variables for exporter container |
+| `monitoring.metricLabels` | map[string]string | Custom metric labels (injected via METRIC_LABELS env var) |
+| `monitoring.prometheusRule` | object | Custom PrometheusRule alert definitions |
 | `aerospikeAccessControl` | object | Roles and users for ACL |
 | `aerospikeNetworkPolicy` | object | Access type configuration (pod/hostInternal/hostExternal) |

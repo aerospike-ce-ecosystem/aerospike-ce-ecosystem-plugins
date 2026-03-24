@@ -1,6 +1,6 @@
 ---
 name: aerospike-py-api
-description: "MUST USE when writing any Python code with aerospike-py or aerospike_py. This is a Rust/PyO3 library with UNCONVENTIONAL patterns that differ from typical Python clients — exceptions live on the module (aerospike_py.RecordNotFound, NOT aerospike_py.exception.RecordNotFound), return types are NamedTuples (record.bins, record.meta.gen, NOT tuple unpacking), and policies use module-level constants (aerospike_py.POLICY_EXISTS_CREATE_ONLY). Without this skill, code will use wrong import paths, wrong return type patterns, and miss critical features like expression filters (exp module), batch operations, CDT list/map, operate_ordered, Prometheus get_metrics(), OpenTelemetry tracing, NumPy integration, and admin APIs. Triggers on: aerospike-py, aerospike_py, AsyncClient, Python + Aerospike, put/get/query/batch with Aerospike."
+description: "MUST USE when writing any Python code with aerospike-py or aerospike_py. This is a Rust/PyO3 library with UNCONVENTIONAL patterns that differ from typical Python clients — exceptions live on the module (aerospike_py.RecordNotFound, NOT aerospike_py.exception.RecordNotFound), return types are NamedTuples (record.bins, record.meta.gen, NOT tuple unpacking), and policies use module-level constants (aerospike_py.POLICY_EXISTS_CREATE_ONLY). Without this skill, code will use wrong import paths, wrong return type patterns, and miss critical features like expression filters (exp module), batch operations, CDT list/map/bit/hll, operate_ordered, backpressure (max_concurrent_operations), Prometheus get_metrics(), OpenTelemetry tracing, NumPy integration, and admin APIs. Triggers on: aerospike-py, aerospike_py, AsyncClient, Python + Aerospike, put/get/query/batch with Aerospike."
 ---
 
 ## Installation
@@ -105,6 +105,7 @@ result = client.operate_ordered(key, ops)  # preserves operation order in result
 
 ```python
 from aerospike_py import list_operations as lop, map_operations as mop
+from aerospike_py import bit_operations as bop, hll_operations as hop
 
 record = client.operate(key, [
     lop.list_append("mylist", "val"), lop.list_get("mylist", 0), lop.list_size("mylist"),
@@ -113,6 +114,10 @@ record = client.operate(key, [
     mop.map_put("mymap", "k1", "v1"),
     mop.map_get_by_key("mymap", "k1", aerospike_py.MAP_RETURN_VALUE),
 ])
+# Bit operations (bitwise manipulation on bytes bins)
+record = client.operate(key, [bop.bit_set("flags", 0, 8, b"\xff"), bop.bit_count("flags", 0, 64)])
+# HyperLogLog (cardinality estimation)
+record = client.operate(key, [hop.hll_add("visitors", ["u1", "u2"], 10), hop.hll_get_count("visitors")])
 ```
 
 Detail: `./reference/write.md` | `./reference/constants.md`
@@ -154,6 +159,9 @@ Detail: `./reference/read.md`
 # User management
 client.admin_create_user("user1", "pass", ["read-write"])
 client.admin_drop_user("user1")
+
+# Cluster topology (sync call on both sync/async clients)
+nodes = client.get_node_names()  # list[str] — NOT awaitable, always sync
 
 # Info
 results = client.info_all("namespaces")  # list[InfoNodeResult]
