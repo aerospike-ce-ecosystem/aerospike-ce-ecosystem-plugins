@@ -25,6 +25,8 @@ Import from `aerospike_py.types`. Used by `aerospike.client(config)` and `AsyncC
 | conn_pools_per_node | int | 1 | Connection pools per node |
 | tend_interval | int | 1000 | Cluster tend interval (ms) |
 | use_services_alternate | bool | false | Use alternate service addresses |
+| max_concurrent_operations | int | 0 (disabled) | Max in-flight operations (backpressure via Tokio Semaphore). Raises `BackpressureError` when exceeded. |
+| operation_queue_timeout_ms | int | 0 (no timeout) | Timeout (ms) for waiting on an operation permit when backpressure is active |
 
 ### Basic Example
 
@@ -159,6 +161,20 @@ results = client.query("test", "demo").results(
 ```
 
 The policy key for expression filters is always `"filter_expression"`.
+
+### Backpressure (Operation Concurrency Limiting)
+
+Limit in-flight operations to prevent connection pool exhaustion under high load:
+
+```python
+config: ClientConfig = {
+    "hosts": [("127.0.0.1", 3000)],
+    "max_concurrent_operations": 64,       # Max 64 concurrent operations
+    "operation_queue_timeout_ms": 5000,    # Wait up to 5s for a permit
+}
+```
+
+When the limit is reached, new operations raise `BackpressureError` (or wait up to `operation_queue_timeout_ms`). Recommended for FastAPI / high-concurrency services.
 
 ### Tokio Runtime Workers
 

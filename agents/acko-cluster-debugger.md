@@ -22,6 +22,8 @@ kubectl get asc <name> -n <ns> -o jsonpath='{.status.phase}'
 kubectl get asc <name> -n <ns> -o jsonpath='{.status.phaseReason}'
 kubectl get asc <name> -n <ns> -o jsonpath='{.status.conditions}' | jq .
 kubectl get asc <name> -n <ns> -o jsonpath='{.status.size}'
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.migrationStatus}' | jq .
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.aerospikeClusterSize}'
 ```
 
 ### Step 2: Branch Based on Phase
@@ -44,11 +46,15 @@ Check for:
 #### If Phase = `WaitingForMigration`
 
 ```bash
-# Pick any running pod
+# Check cluster-level migration status
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.migrationStatus}' | jq .
+# Per-pod migration partitions
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods}' | jq 'to_entries[] | {pod: .key, migrating: .value.migratingPartitions}'
+# Direct asinfo check
 kubectl exec -n <ns> <pod> -c aerospike-server -- asinfo -v 'statistics' | tr ';' '\n' | grep migrate
 ```
 
-This is usually normal during scale-down. Report the migration progress and advise waiting.
+This is usually normal during scale-down. Report `migrationStatus.remainingPartitions` progress and advise waiting.
 
 #### If Phase = `InProgress` (Stuck > 5 Minutes)
 
@@ -140,9 +146,10 @@ After identifying the root cause, suggest the specific fix:
 | CE constraint violation | Fix CR to comply (size<=8, namespaces<=2, no xdr/tls, CE image) |
 | Circuit breaker active | Fix root cause; operator auto-retries with backoff |
 | Dynamic config failed | Set enableDynamicConfigUpdate: false for rolling restart |
-| Split cluster | Verify network connectivity, check cluster-name consistency |
+| Split cluster | Verify network connectivity, check cluster-name consistency. Compare `status.aerospikeClusterSize` with `status.size` |
 | Stop writes | Increase storage capacity or reduce data volume |
 | ACL sync error | Verify Secret exists with correct password key |
+| Operations stuck | Clear operations: `kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"operations":null}}'` |
 
 ## CE 8.1 Common Pitfalls
 

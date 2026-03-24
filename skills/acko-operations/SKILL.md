@@ -1,6 +1,6 @@
 ---
 name: acko-operations
-description: "MUST USE for any modification, debugging, or management of existing Aerospike Kubernetes clusters. Contains ACKO-specific procedures, kubectl commands, and troubleshooting decision trees that prevent data loss during operations. Without this skill, common operations like scaling and upgrades risk incorrect spec patches, webhook rejections, or missed warm restart procedures. Triggers on: scale up/down Aerospike cluster, rolling upgrade, dynamic config change (proto-fd-max, transaction-threads), warm/cold restart, ACL user management, pause/resume, CrashLoopBackOff debugging, phase=Error troubleshooting, asinfo commands, cluster status checks. Covers all ACKO Day-2 operations with verified step-by-step procedures."
+description: "MUST USE for any modification, debugging, or management of existing Aerospike Kubernetes clusters. Contains ACKO-specific procedures, kubectl commands, and troubleshooting decision trees that prevent data loss during operations. Without this skill, common operations like scaling and upgrades risk incorrect spec patches, webhook rejections, or missed warm restart procedures. Triggers on: scale up/down Aerospike cluster, rolling upgrade, dynamic config change (proto-fd-max, transaction-threads), warm/cold restart, ACL user management, pause/resume, clone cluster, clear operations, migration status, CrashLoopBackOff debugging, phase=Error troubleshooting, asinfo commands, cluster status checks. Covers all ACKO Day-2 operations with verified step-by-step procedures."
 ---
 
 # ACKO Day-2 Operations & Troubleshooting
@@ -42,7 +42,11 @@ If migration is in progress, scale-down is automatically deferred and retried af
 
 **Verification**:
 ```bash
-# Check migration status
+# Check migration status (cluster-level)
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.migrationStatus}' | jq .
+# Per-node migration partitions
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods}' | jq '.[].migratingPartitions'
+# Direct asinfo check
 kubectl exec -n <ns> <pod> -c aerospike-server -- asinfo -v 'statistics' | tr ';' '\n' | grep migrate
 ```
 
@@ -286,25 +290,53 @@ kubectl get events -n <ns> --field-selector reason=TemplateDrifted
 
 ---
 
-## 9. Network Configuration
+## 9. Clone Cluster
+
+Create a copy of an existing cluster with a new name (via aerospike-cluster-manager API or manually):
+
+```bash
+# Manual clone: export existing CR, strip status/operations, change name
+kubectl get asc <source> -n <ns> -o json | \
+  jq 'del(.status, .metadata.resourceVersion, .metadata.uid, .metadata.creationTimestamp, .spec.operations, .spec.paused) | .metadata.name = "<new-name>"' | \
+  kubectl apply -f -
+```
+
+The clone preserves the full spec (aerospikeConfig, storage, monitoring, ACL) but strips `operations` and `paused` fields.
+
+---
+
+## 10. Clear Stuck Operations
+
+If an operation is stuck in `InProgress` and blocking new operations:
+
+```bash
+# Remove operations from spec to unblock
+kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"operations":null}}'
+```
+
+Via aerospike-cluster-manager API: `DELETE /api/k8s/clusters/{namespace}/{name}/operations`
+
+---
+
+## 11. Network Configuration
 
 Detail: `./reference/operations.md` (Section 8: Network)
 
 ---
 
-## 10. PDB and Maintenance
+## 12. PDB and Maintenance
 
 Detail: `./reference/operations.md` (Section 9: PDB / Maintenance)
 
 ---
 
-## 11. Readiness Gate
+## 13. Readiness Gate
 
 Detail: `./reference/operations.md` (Section 7: Readiness Gate)
 
 ---
 
-## 12. Troubleshooting Decision Tree
+## 14. Troubleshooting Decision Tree
 
 Use this decision tree to diagnose cluster issues systematically.
 
@@ -430,7 +462,7 @@ Use this decision tree to diagnose cluster issues systematically.
 
 ---
 
-## 13. Diagnostic Commands Quick Reference
+## 15. Diagnostic Commands Quick Reference
 
 Detail: `./reference/diagnostic-commands.md`
 
@@ -439,6 +471,6 @@ Detail: `./reference/diagnostic-commands.md`
 ## Reference Documents
 
 - [Operations Reference](./reference/operations.md) -- Detailed Day-2 operations with all kubectl commands
-- [Events Reference](./reference/events.md) -- All 31 Kubernetes events emitted by ACKO
+- [Events Reference](./reference/events.md) -- All 37 Kubernetes events emitted by ACKO
 - [Troubleshooting Reference](./reference/troubleshooting.md) -- Symptom-based diagnostic table with commands
 - [Validation Rules Reference](./reference/validation-rules.md) -- 53 webhook errors + 15 warnings

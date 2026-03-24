@@ -263,7 +263,24 @@ kubectl -n aerospike-operator logs -l control-plane=controller-manager --tail=10
 
 ---
 
-## 11. Cluster Deletion
+## 11. Migration Status
+
+The operator tracks data migration at both cluster and pod level:
+
+```bash
+# Cluster-level migration status
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.migrationStatus}' | jq .
+# Output: {"inProgress": true, "remainingPartitions": 1024, "lastChecked": "2026-03-24T..."}
+
+# Per-pod migration partitions
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods}' | jq 'to_entries[] | {pod: .key, migrating: .value.migratingPartitions}'
+```
+
+The operator defers destructive actions (scale-down, pod removal) until `migrationStatus.inProgress` is `false`.
+
+---
+
+## 12. Cluster Deletion
 
 ```bash
 kubectl delete asc <name> -n <ns>
