@@ -96,21 +96,25 @@ Remove specific bins from a record.
 client.remove_bin(key, ["temp_bin", "debug_bin"])
 ```
 
-### batch_operate(keys, ops, policy=None) -> list[Record]
+### batch_operate(keys, ops, policy=None) -> BatchRecords
 
 Execute operations on multiple records in a single network call.
 
 ```python
 ops = [{"op": aerospike.OPERATOR_INCR, "bin": "views", "val": 1}]
-results: list[Record] = client.batch_operate(keys, ops)
+results = client.batch_operate(keys, ops)
+for br in results.batch_records:
+    if br.result == 0 and br.record is not None:
+        print(br.record.bins)
 ```
 
-### batch_remove(keys, policy=None) -> list[Record]
+### batch_remove(keys, policy=None) -> BatchRecords
 
 Delete multiple records in a single network call.
 
 ```python
 results = client.batch_remove(keys)
+failed = [br for br in results.batch_records if br.result != 0]
 ```
 
 ### Optimistic Locking
@@ -535,7 +539,7 @@ Write records from a numpy structured array. One designated field serves as the 
 
 Requires `numpy >= 2.0`. Install with: `pip install aerospike-py[numpy]`
 
-### batch_write_numpy(data, namespace, set_name, _dtype, key_field="_key", policy=None) -> list[Record]
+### batch_write_numpy(data, namespace, set_name, _dtype, key_field="_key", policy=None, retry=0) -> BatchRecords
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -545,8 +549,9 @@ Requires `numpy >= 2.0`. Install with: `pip install aerospike-py[numpy]`
 | `_dtype` | `np.dtype` | required | Structured dtype describing the array layout |
 | `key_field` | `str` | `"_key"` | Name of the dtype field to use as the record user key |
 | `policy` | `dict \| None` | `None` | Optional BatchPolicy overrides |
+| `retry` | `int` | `0` | Max retries for transient failures (timeout, device overload, key busy). Exponential backoff 10ms-500ms. |
 
-Returns `list[Record]` -- a list of `Record` NamedTuples `(key, meta, bins)` with write results.
+Returns `BatchRecords` -- contains `batch_records: list[BatchRecord]` where each `BatchRecord` has `key`, `result` (0=success), and `record`.
 
 ### How It Works
 
@@ -602,12 +607,15 @@ data = np.array([
 results = client.batch_write_numpy(data, "test", "demo", dtype)
 
 # Check results
-for record in results:
-    key, meta, bins = record
-    print(f"Key: {key}, Gen: {meta.gen}")
+for br in results.batch_records:
+    if br.result != 0:
+        print(f"Failed: {br.key}, code={br.result}")
+
+# With retry for transient failures
+results = client.batch_write_numpy(data, "test", "demo", dtype, retry=3)
 
 # Async
-results = await async_client.batch_write_numpy(data, "test", "demo", dtype)
+results = await async_client.batch_write_numpy(data, "test", "demo", dtype, retry=3)
 ```
 
 ### Custom Key Field

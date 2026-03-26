@@ -79,14 +79,21 @@ Detail: `./reference/admin.md`
 
 ```python
 keys = [("test", "demo", f"user_{i}") for i in range(10)]
+
+# All batch operations return BatchRecords (same container type)
 batch = client.batch_read(keys)  # or batch_read(keys, bins=["name"])
 for br in batch.batch_records:
     if br.result == 0 and br.record is not None: print(br.record.bins)
+
 results = client.batch_operate(keys, [{"op": aerospike_py.OPERATOR_INCR, "bin": "views", "val": 1}])
+for br in results.batch_records:
+    if br.result == 0 and br.record is not None: print(br.record.bins)
+
 results = client.batch_remove(keys)
+failed = [br for br in results.batch_records if br.result != 0]
 ```
 
-NumPy: `batch_read(..., _dtype=np.dtype(...))` for zero-copy arrays; `batch_write_numpy(data, ns, set, dtype)` for writes. Detail: `./reference/read.md` | `./reference/write.md`
+NumPy: `batch_read(..., _dtype=np.dtype(...))` for zero-copy arrays; `batch_write_numpy(data, ns, set, dtype, retry=3)` for writes with auto-retry. Detail: `./reference/read.md` | `./reference/write.md`
 
 ## 6. Operate / Operate Ordered
 

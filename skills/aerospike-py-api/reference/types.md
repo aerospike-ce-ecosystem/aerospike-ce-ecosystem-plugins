@@ -15,7 +15,7 @@ Import from `aerospike_py.types`.
 ### Record
 `(key: AerospikeKey | None, meta: RecordMetadata | None, bins: dict[str, Any] | None)`
 
-Returned by `get`, `select`, `operate`, `batch_operate`, `batch_remove`, `Query.results`.
+Returned by `get`, `select`, `operate`, `Query.results`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -46,6 +46,29 @@ _, meta, bins = record     # tuple unpacking
 |-------|------|-------------|
 | gen | int | Record generation (write count, used for optimistic locking) |
 | ttl | int | Seconds until expiration |
+
+### BatchRecord
+`(key: AerospikeKey | None, result: int, record: Record | None)`
+
+Per-record result from batch operations. `result` is 0 on success.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| key | AerospikeKey \| None | Record key |
+| result | int | Per-record result code (0 = success) |
+| record | Record \| None | Record data (`None` if failed) |
+
+### BatchRecords
+`(batch_records: list[BatchRecord])`
+
+Container returned by all batch operations: `batch_read`, `batch_operate`, `batch_remove`, `batch_write_numpy`.
+
+```python
+results = client.batch_operate(keys, ops)
+for br in results.batch_records:
+    if br.result == 0 and br.record is not None:
+        print(br.record.bins)
+```
 
 ### ExistsResult
 `(key: AerospikeKey | None, meta: RecordMetadata | None)`
@@ -99,7 +122,8 @@ Returned by `info_all`. One result per cluster node.
 | `operate_ordered()` | `OperateOrderedResult` |
 | `info_all()` | `list[InfoNodeResult]` |
 | `batch_read()` | `BatchRecords` \| `NumpyBatchRecords` |
-| `batch_operate()`, `batch_remove()` | `list[Record]` |
+| `batch_operate()`, `batch_remove()` | `BatchRecords` |
+| `batch_write_numpy()` | `BatchRecords` |
 | `Query.results()` | `list[Record]` |
 
 ---
