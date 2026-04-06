@@ -85,6 +85,11 @@ batch = client.batch_read(keys)  # or batch_read(keys, bins=["name"])
 for br in batch.batch_records:
     if br.result == 0 and br.record is not None: print(br.record.bins)
 
+records = [(k, {"name": f"user_{i}", "score": i * 10}) for i, k in enumerate(keys)]
+results = client.batch_write(records, retry=3)  # per-record bins, auto-retry transient failures
+for br in results.batch_records:
+    if br.result != 0: print(f"Failed: {br.key}, in_doubt={br.in_doubt}")
+
 results = client.batch_operate(keys, [{"op": aerospike_py.OPERATOR_INCR, "bin": "views", "val": 1}])
 for br in results.batch_records:
     if br.result == 0 and br.record is not None: print(br.record.bins)

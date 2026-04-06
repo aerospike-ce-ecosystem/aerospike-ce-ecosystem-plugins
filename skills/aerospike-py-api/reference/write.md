@@ -108,6 +108,43 @@ for br in results.batch_records:
         print(br.record.bins)
 ```
 
+### batch_write(records, policy=None, retry=0) -> BatchRecords
+
+Write multiple records with per-record bins in a single batch call. Each record is a `(key, bins)` tuple. Unlike `batch_operate()` (same ops for all keys), each record can have different bins.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `records` | `list[tuple[Key, dict]]` | required | List of `(key, bins)` tuples |
+| `policy` | `dict` | `None` | Optional BatchPolicy |
+| `retry` | `int` | `0` | Max retries for transient failures (Full Jitter backoff) |
+
+**Returns:** `BatchRecords` — each `BatchRecord` has `.result` (0=OK), `.in_doubt` (bool), `.record`.
+
+**Retryable errors:** Timeout, DeviceOverload, KeyBusy, ServerMemError, PartitionUnavailable.
+
+```python
+# Basic usage
+records = [
+    (("test", "demo", "user1"), {"name": "Alice", "age": 30}),
+    (("test", "demo", "user2"), {"name": "Bob", "age": 25}),
+]
+results = client.batch_write(records)
+
+# With retry
+results = client.batch_write(records, retry=3)
+
+# Async
+results = await async_client.batch_write(records, retry=3)
+
+# Error handling with in_doubt
+for br in results.batch_records:
+    if br.result != 0:
+        if br.in_doubt:
+            print(f"Write may have completed: {br.key}")  # don't blindly retry
+        else:
+            print(f"Write definitely failed: {br.key}, code={br.result}")
+```
+
 ### batch_remove(keys, policy=None) -> BatchRecords
 
 Delete multiple records in a single network call.
