@@ -48,7 +48,7 @@ _, meta, bins = record     # tuple unpacking
 | ttl | int | Seconds until expiration |
 
 ### BatchRecord
-`(key: AerospikeKey | None, result: int, record: Record | None)`
+`(key: AerospikeKey | None, result: int, record: Record | None, in_doubt: bool)`
 
 Per-record result from batch operations. `result` is 0 on success.
 
@@ -57,11 +57,12 @@ Per-record result from batch operations. `result` is 0 on success.
 | key | AerospikeKey \| None | Record key |
 | result | int | Per-record result code (0 = success) |
 | record | Record \| None | Record data (`None` if failed) |
+| in_doubt | bool | `True` if the write may have completed despite the error (e.g., timeout after send). Check before retrying to avoid duplicates. |
 
 ### BatchRecords
 `(batch_records: list[BatchRecord])`
 
-Container returned by all batch operations: `batch_read`, `batch_operate`, `batch_remove`, `batch_write_numpy`.
+Container returned by all batch operations: `batch_read`, `batch_write`, `batch_operate`, `batch_remove`, `batch_write_numpy`.
 
 ```python
 results = client.batch_operate(keys, ops)
@@ -122,7 +123,7 @@ Returned by `info_all`. One result per cluster node.
 | `operate_ordered()` | `OperateOrderedResult` |
 | `info_all()` | `list[InfoNodeResult]` |
 | `batch_read()` | `BatchRecords` \| `NumpyBatchRecords` |
-| `batch_operate()`, `batch_remove()` | `BatchRecords` |
+| `batch_write()`, `batch_operate()`, `batch_remove()` | `BatchRecords` |
 | `batch_write_numpy()` | `BatchRecords` |
 | `Query.results()` | `list[Record]` |
 
