@@ -96,10 +96,10 @@ claude plugin validate /path/to/aerospike-ce-ecosystem-plugins
 
 ```bash
 # With skill
-claude -p "kind cluster에 개발용 Aerospike 1노드 클러스터를 배포해줘" --model sonnet
+claude -p "Deploy a single-node Aerospike cluster for development on a kind cluster" --model sonnet
 
 # Without skill (baseline comparison)
-claude -p "kind cluster에 개발용 Aerospike 1노드 클러스터를 배포해줘" --model sonnet --disable-plugins
+claude -p "Deploy a single-node Aerospike cluster for development on a kind cluster" --model sonnet --disable-plugins
 ```
 
 ## License

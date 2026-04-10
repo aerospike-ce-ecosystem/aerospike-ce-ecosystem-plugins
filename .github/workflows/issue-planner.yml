@@ -1,0 +1,106 @@
+name: Issue Planner
+# On agent label: analyze issue with Claude Code → post implementation plan comment → add plan-complete label
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  plan:
+    if: github.event.label.name == 'agent'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code - Issue Planner
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GH_AW_GITHUB_TOKEN }}
+          bot_id: '${{ vars.CLAUDE_BOT_ID }}'
+          bot_name: '${{ vars.CLAUDE_BOT_NAME }}'
+          prompt: |
+            You are an AI planning agent for the **aerospike-ce-ecosystem-plugins** project.
+
+            ## Project Context
+            - **Structure**: Claude Code plugin with skills and agents
+              - `skills/` — 5 skills (acko-deploy, acko-operations, acko-config-reference, aerospike-py-api, aerospike-py-fastapi)
+              - `agents/` — 1 agent (acko-cluster-debugger)
+              - `evals/` — evaluation test cases
+              - `.claude-plugin/plugin.json` — plugin metadata
+            - **Content type**: Markdown-based skill files with reference documents
+            - **Dependencies**: Skills reference APIs/CRDs/configs from core repos:
+              - aerospike-py (Python client API signatures, exception types, constants)
+              - aerospike-ce-kubernetes-operator (CRD fields, webhook rules, phase names, events)
+              - aerospike-cluster-manager (REST API endpoints)
+
+            ## Task
+            Analyze issue #${{ github.event.issue.number }} and create an implementation plan.
+
+            **Issue Title**: ${{ github.event.issue.title }}
+
+            ### Instructions
+            1. Read the issue description carefully
+            2. Explore the codebase to understand relevant skill files and patterns
+            3. If this is a skill-impact-review issue (from core repo change):
+               - Parse the source repo, changed files, and affected skills from the issue body
+               - Use `gh api` to read the latest source code from the source repo
+               - Compare against current skill content to identify specific updates needed
+            4. If the issue is too vague, comment asking for clarification, add `needs-clarification` label, and stop
+            5. Create a structured plan and post it as a comment:
+
+            ```
+            gh issue comment ${{ github.event.issue.number }} --body "$(cat <<'PLAN'
+            <!-- agent-plan-start -->
+            ## Agent Plan
+
+            ### Analysis
+            [Summary of what the issue requests. Reference specific skill files.]
+
+            ### Proposed Changes
+            | File | Action | Description |
+            |------|--------|-------------|
+            | skills/skill-name/SKILL.md | Modify | Brief description |
+            | skills/skill-name/reference/file.md | Modify | Brief description |
+
+            ### Implementation Strategy
+            1. [Step with specific details]
+            2. [Next step...]
+
+            ### Risk Assessment
+            - **Accuracy**: [Does the updated content match the source repo?]
+            - **Completeness**: [Are all affected skills covered?]
+            - **Breaking changes**: [Will this break existing skill behavior?]
+
+            ### Verification
+            - [ ] Skill content matches source repo API/CRD
+            - [ ] Markdown formatting is valid
+            - [ ] Code examples are correct and runnable
+            - [ ] Cross-references between skills are consistent
+            <!-- agent-plan-end -->
+            PLAN
+            )"
+            ```
+
+            6. After posting the plan comment, add the `plan-complete` label:
+            ```
+            gh issue edit ${{ github.event.issue.number }} --add-label "plan-complete"
+            ```
+
+            ## Constraints
+            - Do NOT create branches or pull requests
+            - Do NOT modify any files in the repository
+            - Your ONLY outputs are: one plan comment + one label
+            - Use Korean for descriptions, English for technical terms
+          claude_args: |
+            --max-turns ${{ vars.CLAUDE_MAX_TURNS }}
+            --model ${{ vars.CLAUDE_MODEL }}
+            --dangerously-skip-permissions
+          settings: '${{ vars.CLAUDE_SETTINGS }}'

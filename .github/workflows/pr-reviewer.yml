@@ -1,0 +1,91 @@
+name: PR Reviewer
+# On needs-review label: auto-review PR diff → verify skill content accuracy (max 5 iterations) → add review-complete label
+
+on:
+  pull_request:
+    types: [labeled]
+
+jobs:
+  review:
+    if: github.event.label.name == 'needs-review'
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(vars.CLAUDE_REVIEW_TIMEOUT) }}
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Run Claude Code - PR Review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GH_AW_GITHUB_TOKEN }}
+          bot_id: '${{ vars.CLAUDE_BOT_ID }}'
+          bot_name: '${{ vars.CLAUDE_BOT_NAME }}'
+          allowed_bots: '${{ vars.CLAUDE_ALLOWED_BOTS }}'
+          branch_prefix: ''
+          prompt: |
+            You are an AI code review agent for **aerospike-ce-ecosystem-plugins**.
+
+            ## Project Context
+            - Claude Code plugin with 5 skills + 1 agent
+            - Skills contain API docs, code examples, CRD specs from core repos
+            - Accuracy of skill content is critical — incorrect examples will mislead users
+
+            ## Task
+            Review PR #${{ github.event.pull_request.number }} with auto-fix loop (max ${{ vars.CLAUDE_REVIEW_MAX_ITERATIONS }} iterations).
+
+            ### Review Loop
+            For each iteration (up to ${{ vars.CLAUDE_REVIEW_MAX_ITERATIONS }}):
+
+            **1. Analyze Changes**
+            - Run `gh pr diff ${{ github.event.pull_request.number }}` to read the diff
+            - Categorize issues by severity:
+              - **HIGH**: Incorrect API signatures, wrong exception names, outdated CRD fields, broken code examples, wrong import paths, factual errors about Aerospike behavior
+              - **MEDIUM**: Missing context in examples, inconsistent formatting, incomplete cross-references between skills, missing edge cases
+              - **LOW**: Typos, style suggestions, minor wording improvements
+              - **INFO**: Observations, positive feedback
+
+            **2. Verify Against Source** (if skill content changed)
+            - Use `gh api repos/aerospike-ce-ecosystem/{repo}/contents/{path}` to verify:
+              - API signatures match `aerospike-py/src/aerospike_py/__init__.pyi`
+              - Exception names match `aerospike-py/rust/src/errors.rs`
+              - CRD fields match `aerospike-ce-kubernetes-operator/api/v1alpha1/aerospikecluster_types.go`
+
+            **3. Decision**
+            - If HIGH or MEDIUM issues exist and iteration < ${{ vars.CLAUDE_REVIEW_MAX_ITERATIONS }}:
+              - Fix all HIGH and MEDIUM issues by editing the affected files
+              - Commit: `git add -A && git commit -m "fix(review): <description>"`
+              - Push: `git push`
+              - Comment progress
+              - Continue to next iteration
+            - If no HIGH/MEDIUM issues OR iteration limit reached:
+              - Break the loop
+
+            **4. Post Final Review**
+            Post a summary comment with severity counts, auto-fixed items, and suggestions.
+            End with: `@kimsoungryoul — Review complete. Human review requested.`
+
+            **5. Add Label**
+            ```
+            gh pr edit ${{ github.event.pull_request.number }} --add-label "review-complete"
+            ```
+
+            ## Constraints
+            - Max ${{ vars.CLAUDE_REVIEW_MAX_ITERATIONS }} iterations
+            - Auto-fix HIGH and MEDIUM severity issues
+            - Leave LOW as suggestions only
+            - Always verify skill content against source repos when possible
+            - Always mention @kimsoungryoul in final comment
+          claude_args: |
+            --max-turns ${{ vars.CLAUDE_MAX_TURNS }}
+            --model ${{ vars.CLAUDE_MODEL }}
+            --dangerously-skip-permissions
+          settings: '${{ vars.CLAUDE_SETTINGS }}'

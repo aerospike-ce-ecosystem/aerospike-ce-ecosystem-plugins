@@ -1,0 +1,96 @@
+name: Agent Implement
+# On plan-complete label: modify skill files based on plan comment → create PR → add needs-review label
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  implement:
+    if: github.event.label.name == 'plan-complete'
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ vars.CLAUDE_IMPLEMENT_TIMEOUT }}
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code - Implement
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GH_AW_GITHUB_TOKEN }}
+          bot_id: '${{ vars.CLAUDE_BOT_ID }}'
+          bot_name: '${{ vars.CLAUDE_BOT_NAME }}'
+          allowed_bots: '${{ vars.CLAUDE_ALLOWED_BOTS }}'
+          branch_prefix: '${{ vars.CLAUDE_BRANCH_PREFIX }}'
+          prompt: |
+            You are an AI implementation agent for the **aerospike-ce-ecosystem-plugins** project.
+
+            ## Project Context
+            - **Structure**: Claude Code plugin with skills and agents
+              - `skills/` — 5 skills (acko-deploy, acko-operations, acko-config-reference, aerospike-py-api, aerospike-py-fastapi)
+              - `agents/` — 1 agent (acko-cluster-debugger)
+              - Each skill has `SKILL.md` (main content) and `reference/` directory (detailed docs)
+            - **Content type**: Markdown-based skill files with embedded code examples, API signatures, CRD specs
+            - **Core repo references**:
+              - aerospike-py: API signatures (`__init__.pyi`), exceptions (`errors.rs`), constants
+              - ACKO: CRD fields (`aerospikecluster_types.go`), webhook rules, phase names, events
+              - cluster-manager: REST API endpoints
+
+            ## Task
+            Implement changes for issue #${{ github.event.issue.number }} based on the existing plan.
+
+            ### Step 1: Find the Plan
+            - Run `gh issue view ${{ github.event.issue.number }} --comments --json comments` to read all comments
+            - Find the comment containing `<!-- agent-plan-start -->`
+            - Extract and follow the plan
+            - If no plan found, comment "No plan found" and stop
+
+            ### Step 2: Fetch Source Data
+            If the issue references a core repo change:
+            - Use `gh api repos/aerospike-ce-ecosystem/{repo}/contents/{path}` to read the latest source files
+            - Decode base64 content to get the actual file content
+            - This is your **source of truth** for updating skill content
+
+            ### Step 3: Implement
+            - Add `in-progress` label: `gh issue edit ${{ github.event.issue.number }} --add-label "in-progress"`
+            - Follow the plan's Proposed Changes and Implementation Strategy
+            - Read each skill file before modifying
+            - Match existing skill content style exactly
+            - Ensure code examples are correct and use current API signatures
+            - Update reference documents if affected
+
+            ### Step 4: Commit and Push
+            - Commit with Conventional Commits format: `docs(skills): update <skill-name> for <change>`
+            - The action will handle branch creation and pushing
+
+            ### Step 5: Create PR
+            After committing, create a PR:
+            ```
+            gh pr create --title "docs(skills): <description>" --body "Closes #${{ github.event.issue.number }}"
+            ```
+
+            ### Step 6: Add Label to PR
+            After creating the PR, add `needs-review` label to the **PR** (not the issue):
+            ```
+            gh pr edit <pr-number> --add-label "needs-review"
+            ```
+
+            ## Constraints
+            - Follow Conventional Commits for all commit messages and PR title
+            - Reference the issue: `Closes #${{ github.event.issue.number }}`
+            - Always read existing skill files before modifying
+            - Verify code examples match the source repo's current API
+            - Use Korean for descriptions, English for technical terms
+          claude_args: |
+            --max-turns ${{ vars.CLAUDE_MAX_TURNS }}
+            --model ${{ vars.CLAUDE_MODEL }}
+            --dangerously-skip-permissions
+          settings: '${{ vars.CLAUDE_SETTINGS }}'
