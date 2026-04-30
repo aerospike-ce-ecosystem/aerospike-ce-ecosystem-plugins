@@ -36,7 +36,14 @@ spec:
     - kind: WarmRestart
       id: warm-001                # length 1-20; must be unique-per-cluster
 
-  # ---- Variants (uncomment one at a time, only after the previous completes) ----
+  # ============================================================================
+  # WARNING: spec.operations[] accepts AT MOST ONE entry. The webhook rejects
+  # the apply with "only one operation can be specified at a time" if you
+  # uncomment a variant below without deleting the active block above.
+  # Also: you cannot modify spec.operations[] while the current op has
+  # status.operation.phase = InProgress. Wait for it to complete or fail.
+  # ============================================================================
+  # ---- Variants (uncomment ONE, after deleting the active block above) ----
 
   # Warm restart only specific pods:
   # operations:

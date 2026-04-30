@@ -594,7 +594,7 @@ Requires `numpy >= 2.0`. Install with: `pip install aerospike-py[numpy]`
 | `policy` | `dict \| None` | `None` | Optional BatchPolicy overrides |
 | `retry` | `int` | `0` | Max retries for transient failures (timeout, device overload, key busy). Exponential backoff 10ms-500ms. |
 
-Returns `BatchRecords` -- contains `batch_records: list[BatchRecord]` where each `BatchRecord` has `key`, `result` (0=success), and `record`.
+Returns `BatchWriteResult` -- a NamedTuple with `batch_records: list[BatchRecord]` where each `BatchRecord` has `key`, `result` (0=success), `record`, and `in_doubt`.
 
 ### How It Works
 

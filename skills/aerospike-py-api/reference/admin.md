@@ -277,7 +277,7 @@ for user_key, bins in records.items():
 for user_key in missing:
     print("missing:", user_key)
 
-# batch_operate / batch_remove still return BatchRecords -- check per-record result
+# batch_operate / batch_remove return BatchWriteResult (NamedTuple) -- check per-record result
 results = client.batch_operate(keys, [{"op": aerospike.OPERATOR_INCR, "bin": "views", "val": 1}])
 for br in results.batch_records:
     if br.result == aerospike.AEROSPIKE_OK and br.record is not None:

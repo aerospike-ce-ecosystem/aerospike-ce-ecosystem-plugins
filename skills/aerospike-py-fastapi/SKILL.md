@@ -1,6 +1,6 @@
 ---
 name: aerospike-py-fastapi
-description: "MUST USE for building FastAPI/REST API applications with Aerospike database. Contains production-ready patterns for aerospike-py (Rust/PyO3 async client) that CANNOT be inferred from general knowledge: correct AsyncClient lifespan management, FastAPI Depends injection for client, aerospike_py exception-to-HTTP-status mapping (RecordNotFound→404, RecordExistsError→409, BackpressureError→503, AerospikeTimeoutError→504), POLICY_EXISTS_CREATE_ONLY/UPDATE_ONLY for CRUD semantics, NamedTuple attribute access (record.bins not tuple unpacking), client.ping() readiness probe, batch_read returning dict, batch_write with in_doubt retry signal, and global AerospikeError handler. Without this skill, generated code uses wrong import paths, missing DI patterns, and lacks backpressure/metrics/health checks. Triggers on: FastAPI + Aerospike, REST API + aerospike-py, CRUD API with Aerospike, client.ping() health probe, batch_read/batch_write endpoint, web server/HTTP service backed by Aerospike NoSQL, uvicorn + Aerospike."
+description: "MUST USE for building FastAPI/REST API applications with Aerospike database (aerospike-py Rust/PyO3 async client). Covers AsyncClient lifespan management, FastAPI Depends injection, aerospike_py exception-to-HTTP-status mapping (RecordNotFound→404, RecordExistsError→409, BackpressureError→503, AerospikeTimeoutError→504), POLICY_EXISTS_CREATE_ONLY/UPDATE_ONLY for CRUD semantics, NamedTuple attribute access (record.bins not tuple unpacking), client.ping() readiness probe, batch_read returning dict, batch_write with in_doubt retry signal, and global AerospikeError handler. Triggers on: FastAPI + Aerospike, REST API + aerospike-py, CRUD API with Aerospike, client.ping() health probe, batch_read/batch_write endpoint, web server/HTTP service backed by Aerospike NoSQL, uvicorn + Aerospike."
 ---
 
 ## 1. App Structure (Lifespan + DI)
@@ -103,8 +103,11 @@ async def batch_write(items: list[BatchWriteItem], client: AsyncClient = Depends
         for item in items
     ]
     result = await client.batch_write(records)         # BatchWriteResult
-    in_doubt = [str(br.key.user_key) for br in result.batch_records if br.result != 0 and br.in_doubt]
-    failed   = [str(br.key.user_key) for br in result.batch_records if br.result != 0 and not br.in_doubt]
+    # br.key may be None for some failure paths -- guard before dereferencing
+    def _user_key(br):
+        return str(br.key.user_key) if br.key is not None else None
+    in_doubt = [_user_key(br) for br in result.batch_records if br.result != 0 and br.in_doubt]
+    failed   = [_user_key(br) for br in result.batch_records if br.result != 0 and not br.in_doubt]
     if in_doubt:
         # Some writes may have applied -- caller should reconcile via batch_read, not blind retry
         return JSONResponse(status_code=503, content={"in_doubt": in_doubt, "failed": failed})

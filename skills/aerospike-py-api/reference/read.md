@@ -102,7 +102,7 @@ for user_key, bins in records.items():
     print(bins)
 ```
 
-Note: `batch_operate`, `batch_remove`, and `batch_write_numpy` still return `BatchRecords` -- only `batch_read` (non-NumPy) changed.
+Note: `batch_operate`, `batch_remove`, `batch_write`, and `batch_write_numpy` return `BatchWriteResult` (a NamedTuple wrapping `list[BatchRecord]`) -- only `batch_read` returns the new dict shape (`BatchRecords`, redefined as a TypeAlias for `dict[UserKey, AerospikeRecord]`).
 
 ### ReadPolicy
 
