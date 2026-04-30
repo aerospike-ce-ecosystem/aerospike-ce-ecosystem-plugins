@@ -97,6 +97,8 @@ Both calls are no-ops if `OTEL_SDK_DISABLED=true` is set. With `pip install aero
 
 Span name is `{OPERATION} {namespace}.{set}` (e.g. `PUT test.users`).
 
+**On error**: in addition to `error.type`, the span sets `db.response.status_code` (Aerospike server status code) and the span status to `ERROR` (`otel.status_code=ERROR`).
+
 ---
 
 ## FastAPI Integration
@@ -150,11 +152,12 @@ def metrics() -> PlainTextResponse:
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `OTEL_SERVICE_NAME` | `aerospike-py` | Service name on every span |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP gRPC collector endpoint |
-| `OTEL_EXPORTER_OTLP_HEADERS` | (unset) | Comma-separated `key=value` headers (auth tokens etc.) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`[^otlp-endpoint] | `http://localhost:4317` | OTLP gRPC collector endpoint |
 | `OTEL_TRACES_EXPORTER` | `otlp` | Set to `none` to keep span creation but disable export |
 | `OTEL_SDK_DISABLED` | `false` | Disable tracing entirely (init_tracing becomes a no-op) |
 | `AEROSPIKE_PY_INTERNAL_METRICS` | `0` | Set `1` to enable internal stage profiling on startup |
+
+[^otlp-endpoint]: `OTEL_EXPORTER_OTLP_ENDPOINT` is not read directly by `aerospike-py`; it is consumed transparently by the underlying `opentelemetry-otlp` exporter. Only `OTEL_SDK_DISABLED`, `OTEL_TRACES_EXPORTER`, and `OTEL_SERVICE_NAME` are explicitly inspected by the Rust core.
 
 Compose / Kubernetes example:
 
@@ -162,7 +165,6 @@ Compose / Kubernetes example:
 env:
   - { name: OTEL_SERVICE_NAME,           value: "checkout-api" }
   - { name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://otel-collector:4317" }
-  - { name: OTEL_EXPORTER_OTLP_HEADERS,  value: "authorization=Bearer ${OTLP_TOKEN}" }
 ```
 
 ---
