@@ -54,7 +54,7 @@ kubectl patch asc <name> -n <ns> --type=merge \
 
 Phase: `RollingRestart` -> `Completed`.
 
-### Dynamic Config Change (No Restart)
+### Dynamic Config Change (No Restart, 2-Phase Commit)
 
 ```yaml
 spec:
@@ -68,15 +68,50 @@ spec:
         stop-writes-pct: 90             # Dynamic parameter (CE 7.x)
 ```
 
+The operator applies dynamic changes via 2-phase commit (April 2026+):
+
+| Phase | Behavior | On failure |
+|-------|----------|------------|
+| 1. Validate-all | Probe every pod with the proposed change (syntax + node responsiveness) | Abort whole update; no pod is mutated |
+| 2. Apply sequentially | Per-pod 30 s timeout (independent of reconciliation timeout) | Run LIFO rollback across already-updated pods |
+| 3. Rollback | Revert each updated pod in reverse order, per-pod 30 s timeout | Set `phase=ConfigDegraded`; cold restart on next reconcile |
+
+This makes a dynamic config rollout effectively atomic from the user's perspective.
+
 Verification:
+
 ```bash
+# Per-pod, per-path detail (April 2026+)
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods[*].dynamicConfigChanges}' | jq
+
+# Aggregate per-pod status (legacy)
 kubectl get asc <name> -o jsonpath='{.status.pods}' | jq '.[].dynamicConfigStatus'
 ```
 
-Status values:
+Per-change `result` enum: `Applied`, `Failed`, `Pending`, `RolledBack`, `RollbackFailed`.
+
+Top-level statuses:
 - `Applied`: Success (no restart needed)
-- `Failed`: Parameter is not dynamically changeable; set `enableDynamicConfigUpdate: false` to force rolling restart
+- `Failed`: Phase 1 validation rejected, OR phase 2 apply failed and rollback succeeded; set `enableDynamicConfigUpdate: false` to force rolling restart
 - `Pending`: Change is being applied
+
+If phase 2 apply AND rollback both fail, the cluster enters `phase=ConfigDegraded` and `ConditionDynamicConfigDegraded=True`. The operator will cold-restart on the next reconcile to converge to spec — do not manually toggle `enableDynamicConfigUpdate` during this window.
+
+Example status snapshot of a partial rollback:
+
+```yaml
+status:
+  pods:
+    cluster-1-0:
+      dynamicConfigChanges:
+        - { path: service.proto-fd-max, oldValue: "15000", newValue: "20000", result: Applied }
+    cluster-1-1:
+      dynamicConfigChanges:
+        - { path: service.proto-fd-max, oldValue: "15000", newValue: "20000", result: RolledBack }
+    cluster-1-2:
+      dynamicConfigChanges:
+        - { path: service.proto-fd-max, oldValue: "15000", newValue: "20000", result: Failed }
+```
 
 ### Batch Size
 
@@ -174,6 +209,15 @@ kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"paused":true}}'    #
 kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"paused":null}}'     # Resume
 ```
 
+Resume clears stale `status.failedReconcileCount` and `status.lastReconcileError` — useful for unsticking a tripped circuit breaker after fixing a permanent error.
+
+Metrics for pause cycles (see `./metrics.md`):
+
+| Metric | Type | Meaning |
+|--------|------|---------|
+| `acko_cluster_paused_timestamp_seconds` | gauge | Unix timestamp of pause start (`0` if not paused) |
+| `acko_cluster_paused_duration_seconds` | histogram | Distribution of pause-cycle durations, observed on resume |
+
 ---
 
 ## 7. Readiness Gate
@@ -239,11 +283,23 @@ spec:
 ### Circuit Breaker
 
 ```bash
-kubectl get asc <name> -o jsonpath='{.status.failedReconcileCount}'       # Threshold: 10
+kubectl get asc <name> -o jsonpath='{.status.failedReconcileCount}'
 kubectl get asc <name> -o jsonpath='{.status.lastReconcileError}'
+kubectl get asc <name> -o jsonpath='{.status.conditions[?(@.type=="ReconcileHealthy")]}' | jq
 ```
 
-Fix root cause. Operator auto-retries with backoff: `min(2^n, 300)` seconds.
+**Two flavors of "breaker active":**
+
+| ReconcileHealthy condition | Cause | Operator behavior | Recovery |
+|----------------------------|-------|-------------------|----------|
+| `status=True` (transient) | Pod not ready, image pull, capacity | Auto-retries with backoff | Fix transient cause; wait |
+| `status=False, reason=PermanentError` | Validation/configgen error, missing Secret | **No auto-retry**; `failedReconcileCount` pinned at max | Fix root cause; toggle `paused: true → null` to clear stale state, OR edit spec to retrigger |
+
+Watching the breaker:
+
+```promql
+acko_circuit_breaker_active{cluster="<name>"} == 1
+```
 
 ### WaitingForMigration
 

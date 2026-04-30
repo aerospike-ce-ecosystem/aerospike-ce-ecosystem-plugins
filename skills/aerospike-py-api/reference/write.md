@@ -96,7 +96,7 @@ Remove specific bins from a record.
 client.remove_bin(key, ["temp_bin", "debug_bin"])
 ```
 
-### batch_operate(keys, ops, policy=None) -> BatchRecords
+### batch_operate(keys, ops, policy=None) -> BatchWriteResult
 
 Execute operations on multiple records in a single network call.
 
@@ -108,44 +108,7 @@ for br in results.batch_records:
         print(br.record.bins)
 ```
 
-### batch_write(records, policy=None, retry=0) -> BatchRecords
-
-Write multiple records with per-record bins in a single batch call. Each record is a `(key, bins)` tuple. Unlike `batch_operate()` (same ops for all keys), each record can have different bins.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `records` | `list[tuple[Key, dict]]` | required | List of `(key, bins)` tuples |
-| `policy` | `dict` | `None` | Optional BatchPolicy |
-| `retry` | `int` | `0` | Max retries for transient failures (Full Jitter backoff) |
-
-**Returns:** `BatchRecords` — each `BatchRecord` has `.result` (0=OK), `.in_doubt` (bool), `.record`.
-
-**Retryable errors:** Timeout, DeviceOverload, KeyBusy, ServerMemError, PartitionUnavailable.
-
-```python
-# Basic usage
-records = [
-    (("test", "demo", "user1"), {"name": "Alice", "age": 30}),
-    (("test", "demo", "user2"), {"name": "Bob", "age": 25}),
-]
-results = client.batch_write(records)
-
-# With retry
-results = client.batch_write(records, retry=3)
-
-# Async
-results = await async_client.batch_write(records, retry=3)
-
-# Error handling with in_doubt
-for br in results.batch_records:
-    if br.result != 0:
-        if br.in_doubt:
-            print(f"Write may have completed: {br.key}")  # don't blindly retry
-        else:
-            print(f"Write definitely failed: {br.key}, code={br.result}")
-```
-
-### batch_remove(keys, policy=None) -> BatchRecords
+### batch_remove(keys, policy=None) -> BatchWriteResult
 
 Delete multiple records in a single network call.
 
@@ -154,10 +117,53 @@ results = client.batch_remove(keys)
 failed = [br for br in results.batch_records if br.result != 0]
 ```
 
+### batch_write(records, policy=None, retry=0) -> BatchWriteResult
+
+Write multiple records with per-record bins (and optional per-record TTL/gen via `WriteMeta`). Each record is a `(key, bins)` tuple, or `(key, bins, meta)` for TTL/gen control. Different from `batch_operate` (which applies the same ops to all keys) — each record can have a completely different bin set.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `records` | `list[tuple[Key, dict]]` or `list[tuple[Key, dict, WriteMeta]]` | required | Per-record key + bins (+ optional WriteMeta) |
+| `policy` | `dict` | `None` | Optional BatchPolicy |
+| `retry` | `int` | `0` | SDK-level max retries for transient failures (Full Jitter backoff) |
+
+**Returns:** `BatchWriteResult` (NamedTuple) — iterate `result.batch_records`; each `BatchRecord` has `.result` (0=OK), `.in_doubt` (bool), `.record`, `.key`.
+
+**Retryable errors (when `retry > 0`):** Timeout, DeviceOverload, KeyBusy, ServerMemError, PartitionUnavailable.
+
+```python
+records = [
+    (("test", "demo", "u1"), {"name": "Alice", "age": 30}),
+    (("test", "demo", "u2"), {"name": "Bob",   "age": 25}, {"ttl": 3600}),
+    (("test", "demo", "u3"), {"name": "Carol", "age": 40}, {"ttl": 0, "gen": 5}),  # CAS via gen
+]
+
+result = client.batch_write(records, retry=3)             # BatchWriteResult
+result = await async_client.batch_write(records, retry=3)  # async equivalent
+
+# Error handling with in_doubt
+for br in result.batch_records:
+    if br.result == 0:
+        continue
+    if br.in_doubt:
+        # write may have completed despite transient error
+        # do NOT blindly retry non-idempotent ops; reconcile via batch_read first
+        ...
+    else:
+        # definitely failed -- safe to retry
+        ...
+```
+
+**Per-record meta tuple:** the optional 3rd element is `WriteMeta` (`{"gen": int, "ttl": int}`). `gen` is honored for per-record optimistic concurrency control.
+
+**`retry` parameter:** SDK-level retry count for the whole batch (defaults to 0). Distinct from `BatchRecord.in_doubt` per-record signal.
+
+**`BatchRecord.in_doubt`** is critical for idempotency decisions: it indicates that a write may have completed before a transient failure was observed. Treat in-doubt records as potentially applied — reconcile state with a follow-up `batch_read` rather than blind retry for non-idempotent operations.
+
 ### Optimistic Locking
 
 ```python
-from aerospike_py.exception import RecordGenerationError
+from aerospike_py import RecordGenerationError
 
 record = client.get(key)
 try:
@@ -576,7 +582,7 @@ Write records from a numpy structured array. One designated field serves as the 
 
 Requires `numpy >= 2.0`. Install with: `pip install aerospike-py[numpy]`
 
-### batch_write_numpy(data, namespace, set_name, _dtype, key_field="_key", policy=None, retry=0) -> BatchRecords
+### batch_write_numpy(data, namespace, set_name, _dtype, key_field="_key", policy=None, retry=0) -> BatchWriteResult
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -588,7 +594,7 @@ Requires `numpy >= 2.0`. Install with: `pip install aerospike-py[numpy]`
 | `policy` | `dict \| None` | `None` | Optional BatchPolicy overrides |
 | `retry` | `int` | `0` | Max retries for transient failures (timeout, device overload, key busy). Exponential backoff 10ms-500ms. |
 
-Returns `BatchRecords` -- contains `batch_records: list[BatchRecord]` where each `BatchRecord` has `key`, `result` (0=success), and `record`.
+Returns `BatchWriteResult` -- a NamedTuple with `batch_records: list[BatchRecord]` where each `BatchRecord` has `key`, `result` (0=success), `record`, and `in_doubt`.
 
 ### How It Works
 

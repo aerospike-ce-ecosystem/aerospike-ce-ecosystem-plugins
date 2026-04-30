@@ -1,9 +1,25 @@
 # Types Reference
 
 ## Table of Contents
+- [Common Type Aliases](#common-type-aliases)
 - [Return Types (NamedTuple)](#return-types)
 - [Policy Types (TypedDict)](#policy-types)
 - [Internal Types](#internal-types)
+
+---
+
+## Common Type Aliases
+
+```python
+UserKey         = str | int                          # primary key value
+AerospikeRecord = dict[str, Any]                     # bins dict
+BatchRecords    = dict[UserKey, AerospikeRecord]     # batch_read return (TypeAlias)
+```
+
+`batch_read()` returns `BatchRecords` (a plain dict — the alias was redefined; it is **not** a NamedTuple).
+Missing keys are simply absent from the dict. NumPy variant `batch_read(_dtype=...)` returns `NumpyBatchRecords` instead.
+
+Write-style batch methods (`batch_write`, `batch_operate`, `batch_remove`, `batch_write_numpy`) return `BatchWriteResult`, a NamedTuple with `.batch_records: list[BatchRecord]` (see below).
 
 ---
 
@@ -48,27 +64,38 @@ _, meta, bins = record     # tuple unpacking
 | ttl | int | Seconds until expiration |
 
 ### BatchRecord
-`(key: AerospikeKey | None, result: int, record: Record | None, in_doubt: bool)`
+`(key: AerospikeKey | None, result: int, record: Record | None, in_doubt: bool = False)`
 
-Per-record result from batch operations. `result` is 0 on success.
+Per-record result from write-style batch operations (`batch_write`, `batch_operate`, `batch_remove`, `batch_write_numpy`). `result` is 0 on success.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | key | AerospikeKey \| None | Record key |
 | result | int | Per-record result code (0 = success) |
 | record | Record \| None | Record data (`None` if failed) |
-| in_doubt | bool | `True` if the write may have completed despite the error (e.g., timeout after send). Check before retrying to avoid duplicates. |
+| in_doubt | bool | `True` if the write may have completed despite the error (e.g., timeout after send). Check before retrying to avoid duplicates with non-idempotent ops. |
 
 ### BatchRecords
-`(batch_records: list[BatchRecord])`
+`TypeAlias = dict[UserKey, AerospikeRecord]`
 
-Container returned by all batch operations: `batch_read`, `batch_write`, `batch_operate`, `batch_remove`, `batch_write_numpy`.
+The return type of `batch_read()`. **Not** a NamedTuple anymore — it's a plain dict mapping each user key (str | int) to its bins dict. Missing keys are simply absent.
 
 ```python
-results = client.batch_operate(keys, ops)
-for br in results.batch_records:
-    if br.result == 0 and br.record is not None:
-        print(br.record.bins)
+records = client.batch_read(keys)            # BatchRecords
+for user_key, bins in records.items():
+    print(user_key, bins["name"])
+```
+
+### BatchWriteResult
+`(batch_records: list[BatchRecord])`
+
+NamedTuple returned by all write-style batch methods: `batch_write`, `batch_operate`, `batch_remove`, `batch_write_numpy`. Iterate `result.batch_records` and check each `BatchRecord.result` (and `.in_doubt` for write retry decisions).
+
+```python
+result = client.batch_write([(key, bins), (key2, bins2, {"ttl": 60})])
+for br in result.batch_records:
+    if br.result != 0 and not br.in_doubt:
+        ...  # safe to retry
 ```
 
 ### ExistsResult
@@ -122,9 +149,9 @@ Returned by `info_all`. One result per cluster node.
 | `operate()` | `Record` |
 | `operate_ordered()` | `OperateOrderedResult` |
 | `info_all()` | `list[InfoNodeResult]` |
-| `batch_read()` | `BatchRecords` \| `NumpyBatchRecords` |
-| `batch_write()`, `batch_operate()`, `batch_remove()` | `BatchRecords` |
-| `batch_write_numpy()` | `BatchRecords` |
+| `batch_read()` | `BatchRecords` (= `dict[UserKey, AerospikeRecord]`) or `NumpyBatchRecords` with `_dtype=` |
+| `batch_write()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()` | `BatchWriteResult` (NamedTuple, `.batch_records: list[BatchRecord]`) |
+| `ping()` | `bool` |
 | `Query.results()` | `list[Record]` |
 
 ---
@@ -166,7 +193,7 @@ Used by: `put()`, `remove()`, `touch()`, `append()`, `prepend()`, `increment()`,
 
 ### WriteMeta
 
-Used by: `put()`, `remove()`, `touch()`, `operate()` etc. as `meta` parameter
+Used by: `put()`, `remove()`, `touch()`, `operate()` etc. as `meta` parameter, and by `batch_write()` as the optional 3rd tuple element per record. `gen` is honored by `batch_write` for per-record CAS.
 
 | Field | Type | Description |
 |-------|------|-------------|

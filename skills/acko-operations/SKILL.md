@@ -1,6 +1,6 @@
 ---
 name: acko-operations
-description: "MUST USE for any modification, debugging, or management of existing Aerospike Kubernetes clusters. Contains ACKO-specific procedures, kubectl commands, and troubleshooting decision trees that prevent data loss during operations. Without this skill, common operations like scaling and upgrades risk incorrect spec patches, webhook rejections, or missed warm restart procedures. Triggers on: scale up/down Aerospike cluster, rolling upgrade, dynamic config change (proto-fd-max, transaction-threads), warm/cold restart, ACL user management, pause/resume, clone cluster, clear operations, migration status, CrashLoopBackOff debugging, phase=Error troubleshooting, asinfo commands, cluster status checks. Covers all ACKO Day-2 operations with verified step-by-step procedures."
+description: "MUST USE for any modification, debugging, or management of existing Aerospike Kubernetes clusters. Contains ACKO-specific procedures, kubectl commands, and troubleshooting decision trees that prevent data loss during operations. Without this skill, common operations like scaling and upgrades risk incorrect spec patches, webhook rejections, or missed warm restart procedures. Triggers on: scale up/down Aerospike cluster, rolling upgrade, dynamic config change (proto-fd-max, transaction-threads, 2PC rollout), ConfigDegraded phase, circuit breaker / permanent error, warm/cold restart, ACL user management, pause/resume, clone cluster, clear operations, migration status, CrashLoopBackOff debugging, phase=Error troubleshooting, asinfo commands, cluster status checks."
 ---
 
 # ACKO Day-2 Operations & Troubleshooting
@@ -89,9 +89,18 @@ kubectl get pods -n <ns> -l aerospike.io/cr-name=<name> -o jsonpath='{range .ite
 
 ---
 
-## 3. Dynamic Config Update (No Restart)
+## 3. Dynamic Config Update (No Restart, 2-Phase Commit)
 
 Apply configuration changes without restarting pods. Only works for dynamically changeable parameters.
+
+### How the operator applies changes (2PC — April 2026)
+
+1. **Phase 1 — validate-all**: operator probes every pod with the proposed change. If ANY pod rejects validation (syntax, node unresponsive), the entire update is aborted and no pod is mutated.
+2. **Phase 2 — apply sequentially**: each pod is updated with a per-pod 30 s timeout (independent of the reconciliation timeout).
+3. **On apply failure**: a LIFO rollback runs across pods that were already updated. Each rollback also has the per-pod 30 s budget.
+4. **On rollback failure**: cluster transitions to `phase = ConfigDegraded`, `ConditionDynamicConfigDegraded=True` is set, and the operator attempts a cold restart on the next reconcile.
+
+This makes dynamic config rollouts atomic from the user's perspective: either every pod ends up on the new value, every pod ends up back on the old value, or you observe `ConfigDegraded` and the operator self-heals via cold restart.
 
 ### Step 1: Enable Dynamic Config
 
@@ -120,12 +129,23 @@ kubectl patch asc <name> -n <ns> --type=merge \
 ### Step 3: Verify
 
 ```bash
+# Per-pod, per-path tracking (April 2026)
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods[*].dynamicConfigChanges}' | jq
+
+# Aggregate per-pod status (legacy field, still populated)
 kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods}' | jq '.[].dynamicConfigStatus'
 ```
 
+Per-change `result` enum (in `dynamicConfigChanges`): `Applied`, `Failed`, `Pending`, `RolledBack`, `RollbackFailed`.
+
+Top-level statuses:
 - `Applied`: Change applied successfully (no restart needed).
-- `Failed`: Parameter is not dynamically changeable. Set `enableDynamicConfigUpdate: false` to force a rolling restart.
+- `Failed`: Phase 1 validation rejected the change on at least one pod, OR phase 2 apply failed and rollback succeeded. Set `enableDynamicConfigUpdate: false` to force a rolling restart.
 - `Pending`: Change is being applied.
+
+### When apply AND rollback both fail
+
+You will see `phase = ConfigDegraded`. Do NOT try to "fix" it by toggling `enableDynamicConfigUpdate` — the operator will cold-restart the pods on the next reconcile to reach a consistent state. See §14 troubleshooting for recovery.
 
 ### Static Config Change (Requires Restart)
 
@@ -143,6 +163,11 @@ kubectl patch asc <name> -n <ns> --type=merge \
 ## 4. Warm Restart / Cold Restart
 
 On-demand restart of pods. Only one operation at a time. Remove the operation from spec after completion.
+
+**Constraints (webhook-enforced):**
+- `kind` must be one of `WarmRestart` (SIGUSR1) or `PodRestart` (delete + recreate). No other values are accepted.
+- `id` must be 1–20 characters, unique-per-cluster.
+- The operations list cannot be modified while an operation has `status.operation.phase = InProgress` — wait for it to complete (or fail) before queueing another.
 
 ### Warm Restart (SIGUSR1)
 
@@ -252,6 +277,18 @@ kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"paused":null}}'
 ```
 
 **Phase**: `Paused` -> `InProgress` -> `Completed`
+
+On resume, the operator clears stale `status.failedReconcileCount` and `status.lastReconcileError`. This is the recommended way to clear a stuck circuit breaker after fixing a permanent error (see §14).
+
+### Pause/Resume Metrics
+
+| Metric | Type | Meaning |
+|--------|------|---------|
+| `acko_cluster_paused_timestamp_seconds` | gauge | Unix timestamp when pause began (`0` if not paused) |
+| `acko_cluster_paused_duration_seconds` | histogram | Distribution of pause-cycle durations (observed on resume) |
+| `acko_circuit_breaker_active` | gauge | `1` while the breaker is tripped, `0` otherwise |
+
+Pause duration is computed from the `ReconciliationPaused` condition's `lastTransitionTime`. Full metric catalog: `./reference/metrics.md`.
 
 ---
 
@@ -407,16 +444,65 @@ Use this decision tree to diagnose cluster issues systematically.
 ### CircuitBreakerActive Event
 
 ```
-1. Check failure count (threshold: 10 consecutive failures):
+1. Check failure count and breaker metric:
    kubectl get asc <name> -n <ns> -o jsonpath='{.status.failedReconcileCount}'
+   # Promql: acko_circuit_breaker_active{cluster="<name>"} == 1
 
 2. Check the last error:
    kubectl get asc <name> -n <ns> -o jsonpath='{.status.lastReconcileError}'
 
-3. Fix the root cause. The operator auto-retries with exponential backoff:
-   delay = min(2^n, 300) seconds
+3. Determine if the error is permanent or transient:
+   kubectl get asc <name> -n <ns> -o jsonpath='{.status.conditions[?(@.type=="ReconcileHealthy")]}' | jq
 
-4. After a successful reconciliation, CircuitBreakerReset event is emitted.
+   - status=False, reason=PermanentError -> validation/configgen/secret error.
+     The operator does NOT auto-retry. failedReconcileCount is pinned at max
+     (no exponential backoff to wait through). You MUST take action:
+       a) Fix the root cause (correct the spec, create the missing Secret, etc.)
+       b) Then either edit the spec to retrigger reconcile, OR toggle pause
+          to clear stale failedReconcileCount and lastReconcileError:
+            kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"paused":true}}'
+            kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"paused":null}}'
+
+   - status=True (transient) -> operator will retry with backoff.
+     Just fix the underlying transient cause (image pull, capacity, etc.).
+
+4. After a successful reconciliation, CircuitBreakerReset event is emitted and
+   acko_circuit_breaker_active drops to 0.
+```
+
+### Phase = ConfigDegraded (NEW, April 2026)
+
+```
+1. Confirm the condition:
+   kubectl get asc <name> -n <ns> -o jsonpath='{.status.conditions[?(@.type=="DynamicConfigDegraded")]}' | jq
+
+2. Inspect per-pod, per-path detail:
+   kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods[*].dynamicConfigChanges}' | jq
+
+3. Meaning: a 2PC dynamic config update failed AND the LIFO rollback also failed.
+   Different pods now have different runtime configs. The operator will attempt
+   a cold restart on the next reconcile to converge to spec.
+
+4. Action: do NOT manually flip enableDynamicConfigUpdate or re-apply the change.
+   Let the cold restart run. If the cold restart loop continues, the underlying
+   config value is invalid for some hardware shape -- revert the spec to the
+   previous known-good value and re-apply.
+
+5. Recovery is complete when phase=Completed and DynamicConfigDegraded is no
+   longer present in conditions.
+```
+
+### ReconciliationPaused = True (Operator Inaction)
+
+```
+1. The operator is intentionally not reconciling because spec.paused=true.
+   This is a normal state, not an error.
+
+2. Resume:
+   kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"paused":null}}'
+
+3. Resume also clears stale failedReconcileCount and lastReconcileError --
+   useful for unsticking a circuit breaker after fixing a permanent error.
 ```
 
 ### Webhook Rejects CR (Apply Error)
@@ -432,7 +518,7 @@ Use this decision tree to diagnose cluster issues systematically.
    - heartbeat.mode != mesh
    - Missing admin user with sys-admin + user-admin roles
 
-3. See reference/validation-rules.md for the complete list of 53 errors and 15 warnings.
+3. See reference/validation-rules.md for the complete list of validation errors and warnings (count grows over releases — see file header).
 ```
 
 ### dynamicConfigStatus = Failed
@@ -471,6 +557,8 @@ Detail: `./reference/diagnostic-commands.md`
 ## Reference Documents
 
 - [Operations Reference](./reference/operations.md) -- Detailed Day-2 operations with all kubectl commands
-- [Events Reference](./reference/events.md) -- All 37 Kubernetes events emitted by ACKO
+- [Events Reference](./reference/events.md) -- Kubernetes events emitted by ACKO (including 2PC dynamic-config events)
 - [Troubleshooting Reference](./reference/troubleshooting.md) -- Symptom-based diagnostic table with commands
-- [Validation Rules Reference](./reference/validation-rules.md) -- 53 webhook errors + 15 warnings
+- [Validation Rules Reference](./reference/validation-rules.md) -- Webhook error/warning catalog (canonical source)
+- [Diagnostic Commands](./reference/diagnostic-commands.md) -- kubectl one-liners for common diagnostics
+- [Operator Metrics](./reference/metrics.md) -- Prometheus metrics emitted by the operator

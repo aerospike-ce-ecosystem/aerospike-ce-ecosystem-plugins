@@ -1,6 +1,6 @@
 ---
 name: acko-config-reference
-description: "Aerospike CE 8.1 configuration parameters, CRD YAML mapping, and ACKO operator auto-processing rules. Background reference for Aerospike cluster configuration on Kubernetes. Automatically consulted when configuring Aerospike CE 8.1 parameters, writing AerospikeCluster CRD YAML, or understanding breaking changes from 7.x to 8.1."
+description: "Aerospike CE 8.1 configuration parameters, CRD YAML mapping, ACKO operator auto-processing rules, AerospikeCluster status phases/conditions, and webhook validation rules. Background reference for Aerospike cluster configuration on Kubernetes. Automatically consulted when configuring CE 8.1 parameters, writing AerospikeCluster CRD YAML, looking up status phase/condition meanings (Completed, ConfigDegraded, ReconcileHealthy), or understanding breaking changes from 7.x to 8.1."
 user-invocable: false
 ---
 
@@ -26,14 +26,17 @@ Verify these items before deploying an Aerospike CE 8.1 cluster on Kubernetes.
 | 8 | Console logging | Enables `kubectl logs` integration |
 | 9 | `nsup-period` + `default-ttl` | `nsup-period=0` + `default-ttl!=0` causes startup failure |
 | 10 | CE image only | `aerospike:ce-8.1.1.1` (enterprise/ee-/ent- rejected by webhook) |
+| 11 | `aerospikeConfig` map/list shape | `service`/`network` must be maps; `logging` must be a list; namespace entries must be maps with `name` key (webhook strengthened April 2026) |
+| 12 | `MetricLabels` TOML safety | Values are TOML double-quote-wrapped and backslash-escaped; control chars rejected by webhook |
 
 ---
 
-## Critical Breaking Changes (Top 3)
+## Critical Breaking Changes (Top 4)
 
 1. **`info { port 3003 }` removed** -- causes parse error and CrashLoopBackOff. Use `admin { port 3008 }`.
 2. **`memory-size` replaced by `data-size`** -- must be inside `storage-engine memory {}` block, minimum 512 MiB.
 3. **`write-block-size` replaced by `flush-size`** -- internal write-block fixed at 8M in 7.1+.
+4. **Webhook strengthened (April 2026)** -- CR rejected at admission if `aerospikeConfig.service`/`network` is not a map, `logging` is not a list, namespace entries are not maps with `name` key, or `MetricLabels` contains control chars. See `reference/webhook-validation.md`.
 
 Full reference: `reference/breaking-changes-7x-to-8.md`
 
@@ -47,7 +50,8 @@ Full reference: `reference/breaking-changes-7x-to-8.md`
 | 8.1 parameter defaults, network ports, dynamic config commands | `reference/parameters-8.md` |
 | Byte value conversion table (human-readable to integer) | `reference/byte-values.md` |
 | Webhook validation rules and CE constraints | `reference/webhook-validation.md` |
-| CRD-to-conf mapping, operator auto-processing, ACL config | `reference/crd-mapping.md` |
+| CRD-to-conf mapping, operator auto-processing, ACL config, status fields | `reference/crd-mapping.md` |
+| AerospikeCluster phases & conditions (Completed, ConfigDegraded, ReconcileHealthy, etc.) | `reference/conditions-and-phases.md` |
 
 ## Examples
 

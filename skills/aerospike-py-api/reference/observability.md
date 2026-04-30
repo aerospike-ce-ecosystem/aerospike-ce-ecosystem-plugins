@@ -27,6 +27,7 @@ Built-in Rust-to-Python logging bridge that forwards all internal Rust logs to P
 | Function | Description |
 |----------|-------------|
 | set_log_level(level: int) | Set Rust logger level |
+| dropped_log_count() -> int | Total logs dropped due to bridge back-pressure (slow Python sink) |
 
 ```python
 import logging
@@ -34,6 +35,10 @@ import aerospike_py
 
 logging.basicConfig(level=logging.DEBUG)
 aerospike_py.set_log_level(aerospike_py.LOG_LEVEL_DEBUG)
+
+# Periodically check for dropped logs to detect a slow logging sink
+if aerospike_py.dropped_log_count() > 0:
+    logging.warning("aerospike-py dropped %d log records", aerospike_py.dropped_log_count())
 ```
 
 ### Logger Names
@@ -157,10 +162,11 @@ sum by (db_namespace, db_operation_name) (rate(db_client_operation_duration_seco
 | Scenario | Overhead |
 |----------|----------|
 | Per-operation recording | ~30-80 ns (atomic increment) |
+| `set_metrics_enabled(False)` | ~1 ns (atomic check, useful for benchmarks) |
 | Relative to network round-trip | 0.001-0.01% |
 | `get_metrics()` encoding | ~50-200 us |
 
-Metrics collection is always enabled with negligible overhead.
+Metrics collection is enabled by default. Toggle off via `set_metrics_enabled(False)` for benchmark runs.
 
 ---
 
