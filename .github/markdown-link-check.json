@@ -4,7 +4,8 @@
     { "pattern": "^https?://127\\.0\\.0\\.1(:[0-9]+)?(/.*)?$" },
     { "pattern": "^https?://0\\.0\\.0\\.0(:[0-9]+)?(/.*)?$" },
     { "pattern": "^https?://([a-z0-9-]+\\.)*svc(\\.cluster\\.local)?(:[0-9]+)?(/.*)?$" },
-    { "pattern": "^mailto:" }
+    { "pattern": "^mailto:" },
+    { "pattern": "^https://github.com/aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins/(releases/tag|compare)/v[0-9]+\\.[0-9]+\\.[0-9]+" }
   ],
   "replacementPatterns": [
     {
