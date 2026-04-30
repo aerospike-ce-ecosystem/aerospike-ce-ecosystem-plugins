@@ -23,14 +23,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Markdown link check (skills/agents/commands/root)
+      - name: Markdown link check (skills/agents/root)
         uses: gaurav-nelson/github-action-markdown-link-check@v1
         with:
           use-quiet-mode: "yes"
           use-verbose-mode: "yes"
           config-file: ".github/markdown-link-check.json"
           file-extension: ".md"
-          folder-path: "skills,agents,commands"
+          folder-path: "skills,agents"
           # Also scan top-level *.md (README, CHANGELOG, VERSIONING).
           file-path: "./README.md,./CHANGELOG.md,./VERSIONING.md"
           base-branch: "main"
