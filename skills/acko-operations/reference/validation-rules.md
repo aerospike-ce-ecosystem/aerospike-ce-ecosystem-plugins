@@ -1,6 +1,6 @@
 # Validation Rules Reference
 
-Complete list of ACKO webhook validation errors (53) and warnings (15).
+Canonical catalog of ACKO webhook validation errors and non-blocking warnings. The exact count grows over releases — this page is the source of truth; `acko-config-reference/reference/webhook-validation.md` is a shape-and-constraints summary that links here.
 
 ---
 
@@ -23,6 +23,12 @@ Complete list of ACKO webhook validation errors (53) and warnings (15).
 | `tls` section present | `"aerospikeConfig must not contain 'tls' section (TLS is Enterprise-only)"` |
 | namespaces > 2 | `"aerospikeConfig.namespaces count N exceeds CE maximum of 2"` |
 | `heartbeat.mode != "mesh"` | `"aerospikeConfig.network.heartbeat.mode must be 'mesh' for CE"` |
+| `service` not a map | `"aerospikeConfig.service must be a map"` |
+| `network` not a map | `"aerospikeConfig.network must be a map"` |
+| `logging` not a list | `"aerospikeConfig.logging must be a list"` |
+| namespace entry not a map with `name` | `"aerospikeConfig.namespaces[N] must be a map with required key 'name'"` |
+| Rack ID add+remove in single update | `"rackConfig: rack IDs cannot be added and removed in the same update (rename-like change risks data loss)"` |
+| `MetricLabels` value contains control chars | `"monitoring.metricLabels[\"key\"]: control characters are not permitted in TOML output"` |
 
 ### Enterprise-Only Namespace Keys (10)
 
@@ -103,6 +109,7 @@ Privilege format: `"<code>"` / `"<code>.<namespace>"` / `"<code>.<namespace>.<se
 |------|--------------|
 | More than 1 operation | `"only one operation can be specified at a time"` |
 | ID length outside 1-20 chars | `"operation id must be 1-20 characters"` |
+| Invalid `kind` | `"operation kind must be one of: WarmRestart, PodRestart"` |
 | Change during InProgress | `"cannot change operations while operation \"ID\" is InProgress"` |
 
 ### Update-Only Validation

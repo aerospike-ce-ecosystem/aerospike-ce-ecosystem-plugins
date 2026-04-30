@@ -205,7 +205,7 @@ nodes = async_client.get_node_names()    # async client — NOT awaitable, alway
 Always catch specific exceptions before broader ones:
 
 ```python
-from aerospike_py.exception import (
+from aerospike_py import (
     RecordNotFound,
     AerospikeTimeoutError,
     ClusterError,
@@ -267,9 +267,19 @@ Batch operations do not raise exceptions for individual record failures. Check p
 import aerospike_py as aerospike
 
 keys = [("test", "demo", f"id-{i}") for i in range(100)]
-batch = client.batch_read(keys)
+records = client.batch_read(keys)
+# batch_read returns dict[UserKey, AerospikeRecord]; missing keys are absent
+present_user_keys = set(records.keys())
+expected_user_keys = {f"id-{i}" for i in range(100)}
+missing = expected_user_keys - present_user_keys
+for user_key, bins in records.items():
+    print(user_key, bins)
+for user_key in missing:
+    print("missing:", user_key)
 
-for br in batch.batch_records:
+# batch_operate / batch_remove still return BatchRecords -- check per-record result
+results = client.batch_operate(keys, [{"op": aerospike.OPERATOR_INCR, "bin": "views", "val": 1}])
+for br in results.batch_records:
     if br.result == aerospike.AEROSPIKE_OK and br.record is not None:
         print(br.record.bins)
     elif br.result == aerospike.AEROSPIKE_ERR_RECORD_NOT_FOUND:
@@ -278,7 +288,7 @@ for br in batch.batch_records:
         print("error:", br.key, br.result)
 ```
 
-For `batch_operate` / `batch_remove`, the same pattern applies -- check `br.result` per record.
+For `batch_write`, also inspect `br.in_doubt` to decide whether a failure is safe to retry.
 
 ### Async Error Handling
 
@@ -298,7 +308,7 @@ async def get_user(client, user_id: str) -> dict | None:
 ### Connection Error Handling
 
 ```python
-from aerospike_py.exception import ClusterError
+from aerospike_py import ClusterError
 
 try:
     client = aerospike.client(config).connect()
@@ -311,7 +321,7 @@ The client automatically reconnects to surviving nodes. For transient failures, 
 
 ```python
 import time
-from aerospike_py.exception import AerospikeTimeoutError, ClusterError
+from aerospike_py import AerospikeTimeoutError, ClusterError
 
 TRANSIENT_ERRORS = (AerospikeTimeoutError, ClusterError)
 
@@ -348,7 +358,7 @@ def resilient_get(client, key, max_retries: int = 3):
 
 ## Exception Hierarchy
 
-All exceptions are importable from `aerospike_py` or `aerospike_py.exception`.
+All exceptions are importable from `aerospike_py` directly. There is **no** `aerospike_py.exception` submodule (the previous alias was removed).
 
 ```
 AerospikeError

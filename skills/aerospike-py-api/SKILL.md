@@ -1,6 +1,6 @@
 ---
 name: aerospike-py-api
-description: "MUST USE when writing any Python code with aerospike-py or aerospike_py. This is a Rust/PyO3 library with UNCONVENTIONAL patterns that differ from typical Python clients — exceptions live on the module (aerospike_py.RecordNotFound, NOT aerospike_py.exception.RecordNotFound), return types are NamedTuples (record.bins, record.meta.gen, NOT tuple unpacking), and policies use module-level constants (aerospike_py.POLICY_EXISTS_CREATE_ONLY). Without this skill, code will use wrong import paths, wrong return type patterns, and miss critical features like expression filters (exp module), batch operations, CDT list/map/bit/hll, operate_ordered, backpressure (max_concurrent_operations), Prometheus get_metrics(), OpenTelemetry tracing, NumPy integration, and admin APIs. Triggers on: aerospike-py, aerospike_py, AsyncClient, Python + Aerospike, put/get/query/batch with Aerospike."
+description: "MUST USE when writing any Python code with aerospike-py or aerospike_py. This is a Rust/PyO3 library with UNCONVENTIONAL patterns that differ from typical Python clients — exceptions live on the module (aerospike_py.RecordNotFound, NOT aerospike_py.exception.RecordNotFound), return types are NamedTuples (record.bins, record.meta.gen, NOT tuple unpacking), batch_read returns dict[UserKey, AerospikeRecord] (NOT BatchRecords), and policies use module-level constants (aerospike_py.POLICY_EXISTS_CREATE_ONLY). Without this skill, code will use wrong import paths, wrong return type patterns, and miss critical features like expression filters (exp module), batch_write with in_doubt retry semantics, CDT list/map/bit/hll, ping() health check, backpressure, Prometheus metrics, OpenTelemetry tracing, NumPy integration, and admin APIs. Triggers on: aerospike-py, aerospike_py, AsyncClient, client.ping(), batch_write, Python + Aerospike, put/get/query/batch with Aerospike."
 ---
 
 ## Installation
@@ -10,6 +10,8 @@ pip install aerospike-py         # core
 pip install aerospike-py[numpy]  # NumPy batch integration
 pip install aerospike-py[otel]   # OpenTelemetry context propagation
 ```
+
+Wheels include Python 3.14 and 3.14t (free-threaded, `gil_used=true`).
 
 **Import note**: Rust/PyO3 extension. All exceptions and constants live on `aerospike_py` module directly (e.g., `aerospike_py.RecordNotFound`). No `aerospike_py.exception` submodule. Return types are NamedTuples — use `record.bins`, `record.meta.gen`. Type stubs: `src/aerospike_py/__init__.pyi`
 
@@ -73,6 +75,8 @@ except aerospike_py.AerospikeError as e: ...  # catch-all
 
 Hierarchy: `AerospikeError` > `ClientError(BackpressureError)`, `ClusterError`, `AerospikeTimeoutError`, `RecordError(RecordNotFound, RecordExistsError, RecordGenerationError, FilteredOut, ...)`, `ServerError(AerospikeIndexError, QueryError, AdminError, UDFError)`
 
+`TimeoutError`/`IndexError` aliases are removed -- use `AerospikeTimeoutError`/`AerospikeIndexError`.
+
 Detail: `./reference/admin.md`
 
 ## 5. Batch Operations
@@ -80,16 +84,13 @@ Detail: `./reference/admin.md`
 ```python
 keys = [("test", "demo", f"user_{i}") for i in range(10)]
 
-# All batch operations return BatchRecords (same container type)
-batch = client.batch_read(keys)  # or batch_read(keys, bins=["name"])
-for br in batch.batch_records:
-    if br.result == 0 and br.record is not None: print(br.record.bins)
+# batch_read -> dict[UserKey, AerospikeRecord]  (UserKey = str | int, AerospikeRecord = dict[str, Any])
+records = client.batch_read(keys)  # or batch_read(keys, bins=["name"])
+for user_key, bins in records.items():
+    print(user_key, bins["name"])
+# Missing keys are absent from dict. 2.6x faster than C client under asyncio.gather.
 
-records = [(k, {"name": f"user_{i}", "score": i * 10}) for i, k in enumerate(keys)]
-results = client.batch_write(records, retry=3)  # per-record bins, auto-retry transient failures
-for br in results.batch_records:
-    if br.result != 0: print(f"Failed: {br.key}, in_doubt={br.in_doubt}")
-
+# batch_operate / batch_remove return BatchWriteResult (NamedTuple wrapper with .batch_records)
 results = client.batch_operate(keys, [{"op": aerospike_py.OPERATOR_INCR, "bin": "views", "val": 1}])
 for br in results.batch_records:
     if br.result == 0 and br.record is not None: print(br.record.bins)
@@ -98,7 +99,28 @@ results = client.batch_remove(keys)
 failed = [br for br in results.batch_records if br.result != 0]
 ```
 
-NumPy: `batch_read(..., _dtype=np.dtype(...))` for zero-copy arrays; `batch_write_numpy(data, ns, set, dtype, retry=3)` for writes with auto-retry. Detail: `./reference/read.md` | `./reference/write.md`
+NumPy: `batch_read(..., _dtype=np.dtype(...))` returns `NumpyBatchRecords` (NOT dict); `batch_write_numpy(data, ns, set, dtype, retry=3)` for writes with auto-retry. Detail: `./reference/read.md` | `./reference/write.md`
+
+## 5b. Batch Write
+
+Per-record bins (and optional per-record TTL/gen via `WriteMeta`). Different from `batch_operate` which applies same ops to all keys.
+
+```python
+records = [
+    (("test", "demo", "u1"), {"name": "Alice", "age": 30}),
+    (("test", "demo", "u2"), {"name": "Bob",   "age": 25}, {"ttl": 3600}),
+    (("test", "demo", "u3"), {"name": "Carol", "age": 40}, {"ttl": 0, "gen": 5}),  # CAS via gen
+]
+result = client.batch_write(records, retry=0)  # BatchWriteResult
+for br in result.batch_records:
+    if br.result != 0:
+        if br.in_doubt:
+            ...  # write may have succeeded -- do NOT blindly retry non-idempotent ops
+        else:
+            ...  # safe to retry
+```
+
+`BatchRecord.in_doubt: bool` is critical for idempotency decisions. Detail: `./reference/write.md`
 
 ## 6. Operate / Operate Ordered
 
@@ -148,6 +170,8 @@ records = query.results()     # or query.foreach(callback)
 
 Predicates: `p.equals(bin, val)`, `p.between(bin, min, max)`, `p.contains(bin, idx_type, val)`
 
+> Scan API removed -- use `Query` (no `where` clause) for full-set scan. `get_many`/`exists_many`/`select_many` removed -- use `batch_read`/`batch_operate`.
+
 ## 9. Expression Filters
 
 Server-side filtering (Aerospike 5.2+). No secondary index required. Policy key: `"filter_expression"`.
@@ -182,13 +206,31 @@ response = client.info_random_node("build")  # str
 
 Detail: `./reference/admin.md`
 
+## 10b. Health Check (`ping`)
+
+```python
+ok: bool = client.ping()              # sync: info("build") round-trip to a random node
+ok: bool = await async_client.ping()  # async equivalent
+```
+
+Never raises -- returns `False` on failure. Use for K8s readiness probes and load-balancer health checks. Detail: `./reference/health.md`
+
 ## 11. Observability
 
 ```python
-aerospike_py.start_metrics_server(port=9464)       # Prometheus /metrics endpoint
-aerospike_py.get_metrics()                          # Prometheus text format string
-aerospike_py.init_tracing(); aerospike_py.shutdown_tracing()  # OpenTelemetry (OTEL_* env vars)
-aerospike_py.set_log_level(aerospike_py.LOG_LEVEL_DEBUG)      # OFF=-1,ERR=0,WARN=1,INFO=2,DBG=3,TRACE=4
+# Metrics (Prometheus text format)
+aerospike_py.start_metrics_server(port=9464)        # built-in HTTP /metrics endpoint
+aerospike_py.stop_metrics_server()
+aerospike_py.get_metrics()                           # current metrics as string
+aerospike_py.set_metrics_enabled(False)              # disable collection (~1ns atomic check overhead)
+aerospike_py.is_metrics_enabled()                    # bool
+
+# Tracing (OpenTelemetry; reads OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME)
+aerospike_py.init_tracing(); aerospike_py.shutdown_tracing()
+
+# Logging (Rust -> Python bridge)
+aerospike_py.set_log_level(aerospike_py.LOG_LEVEL_DEBUG)  # OFF=-1,ERR=0,WARN=1,INFO=2,DBG=3,TRACE=4
+aerospike_py.dropped_log_count()                     # int -- back-pressure counter (drops when sink slow)
 ```
 
 Detail: `./reference/observability.md`

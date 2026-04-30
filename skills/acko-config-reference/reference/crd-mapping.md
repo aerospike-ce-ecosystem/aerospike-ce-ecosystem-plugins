@@ -57,3 +57,34 @@ type: Opaque
 data:
   password: YWRtaW4xMjM=              # base64-encoded password
 ```
+
+---
+
+## Status Fields (NEW: dynamicConfigChanges)
+
+`status.pods[].dynamicConfigChanges []DynamicConfigChangeStatus` (April 2026) tracks each path mutated in the most recent dynamic config attempt. Useful for debugging which specific change failed in a 2-phase commit rollout.
+
+```yaml
+status:
+  pods:
+    cluster-1-0:
+      dynamicConfigChanges:
+        - path: service.proto-fd-max
+          oldValue: "15000"
+          newValue: "20000"
+          result: Applied
+        - path: namespaces.testns.default-ttl
+          oldValue: "0"
+          newValue: "3600"
+          result: RolledBack       # phase 2 apply failed -> LIFO rollback succeeded
+```
+
+Per-change `result` enum: `Applied`, `Failed`, `Pending`, `RolledBack`, `RollbackFailed`.
+
+Inspect with:
+
+```bash
+kubectl get asc <name> -o jsonpath='{.status.pods[*].dynamicConfigChanges}' | jq
+```
+
+For phase/condition meanings (`ConfigDegraded`, `DynamicConfigDegraded`, `ReconcileHealthy`, `ReconciliationPaused`), see `conditions-and-phases.md`.

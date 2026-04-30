@@ -32,6 +32,12 @@ kubectl exec -n <ns> <pod> -c aerospike-server -- asinfo -v 'namespace/<ns-name>
 
 # ===== Dynamic Config Status =====
 kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods}' | jq '.[].dynamicConfigStatus'
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods[*].dynamicConfigChanges}' | jq    # per-path detail (April 2026+)
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.conditions[?(@.type=="DynamicConfigDegraded")]}' | jq
+
+# ===== Reconcile Health (circuit breaker / permanent error) =====
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.conditions[?(@.type=="ReconcileHealthy")]}' | jq
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.conditions[?(@.type=="ReconciliationPaused")]}' | jq
 
 # ===== Template Status =====
 kubectl get asc <name> -n <ns> -o jsonpath='{.status.templateSnapshot.synced}'
@@ -41,5 +47,5 @@ kubectl get events -n <ns> --field-selector reason=TemplateDrifted
 kubectl get pvc -n <ns> -l aerospike.io/cr-name=<name>
 
 # ===== Operation Status =====
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.operationStatus}' | jq .
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.operation}' | jq .   # phase, completedPods, failedPods
 ```

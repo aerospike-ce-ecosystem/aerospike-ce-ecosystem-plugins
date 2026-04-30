@@ -1,6 +1,6 @@
 ---
 name: acko-deploy
-description: "MUST USE for deploying Aerospike on Kubernetes. Contains CE-specific YAML templates, validated AerospikeCluster CR examples, and critical constraints that prevent enterprise-only config mistakes (feature-key-file, security sections crash CE pods). Without this skill, deployments fail on first attempt due to CE 8.1 breaking changes (data-size not memory-size, no info port 3003). Triggers on: deploy/create/set up Aerospike on K8s, kind, minikube, EKS, GKE; AerospikeCluster CR; ACKO operator; Aerospike cluster YAML; NoSQL database on Kubernetes. This skill has 8 ready-to-use YAML examples from minimal single-node to full-featured multi-rack with monitoring."
+description: "MUST USE for deploying Aerospike on Kubernetes. Contains CE-specific YAML templates, validated AerospikeCluster CR examples, and critical constraints that prevent enterprise-only config mistakes (feature-key-file, security sections crash CE pods). Without this skill, deployments fail on first attempt due to CE 8.1 breaking changes (data-size not memory-size, no info port 3003) or webhook map/list shape rules (service/network must be maps; logging must be a list). Triggers on: deploy/create/set up Aerospike on K8s, kind, minikube, EKS, GKE; AerospikeCluster CR; ACKO operator; spec.operations / WarmRestart / PodRestart YAML; NoSQL database on Kubernetes. 9 ready-to-use YAML examples from minimal single-node to full-featured multi-rack."
 ---
 
 # ACKO Deployment Guide
@@ -95,6 +95,8 @@ These constraints are enforced by the ACKO validating webhook. Violating any of 
 8. **Replication factor**: Must be between 1 and 4, and must not exceed `spec.size`.
 9. **No Enterprise namespace keys**: The following keys are forbidden in namespace config: `compression`, `compression-level`, `durable-delete`, `fast-restart`, `index-type`, `sindex-type`, `rack-id`, `strong-consistency`, `tomb-raider-eligible-age`, `tomb-raider-period`.
 10. **No Enterprise security keys**: Only `enable-security` and `default-password-file` are allowed in `aerospikeConfig.security`. The keys `tls`, `ldap`, `log`, `syslog` are forbidden.
+11. **Strengthened map/list shapes (April 2026)**: `aerospikeConfig.service` and `aerospikeConfig.network` must be YAML maps; `aerospikeConfig.logging` must be a YAML list; each `namespaces[]` entry must be a map with a `name` key. `MetricLabels` values are TOML-escaped — control characters are rejected. Within one update, namespace `rack-id` may be added OR removed but not both (prevents data loss on rename).
+12. **Operations spec invariants**: `spec.operations[].kind` must be `WarmRestart` or `PodRestart`; `spec.operations[].id` length 1–20 chars; the operations list cannot be modified while one operation is `InProgress`. `spec.overrides` only valid when `spec.templateRef` is set.
 
 ---
 
@@ -141,6 +143,13 @@ Choose the scenario that matches your needs. Each links to a ready-to-use YAML e
 - **File**: [./examples/08-full-featured.yaml](./examples/08-full-featured.yaml)
 - **Use when**: Production deployment with all features enabled
 - **Key features**: ACL + monitoring + multi-rack + PV + PDB + dynamic config
+
+### Scenario 9: On-Demand Operations (WarmRestart / PodRestart)
+- **File**: [./examples/09-operations.yaml](./examples/09-operations.yaml)
+- **Use when**: You need to manually restart pods (warm via SIGUSR1, or full pod recreate) without changing spec
+- **Key features**: `spec.operations[]` with `WarmRestart` (SIGUSR1) or `PodRestart` (delete+recreate); optional `podList` to target specific pods; webhook prevents modifying the operations list while one is `InProgress`
+
+> **Monitoring sample note (`04-monitoring.yaml`)**: Recent fix — `metricLabels` values are TOML-escaped (double-quote-wrapped, backslash-escaped, control chars rejected) and the demo `emptyDir` mount points to `/opt/aerospike/work` instead of accidentally overlaying `/opt/aerospike`. If you cloned this example before April 2026, verify both.
 
 ---
 
@@ -203,3 +212,9 @@ Byte values: See acko-config-reference skill's `reference/byte-values.md`
 ## 8. CE 8.1 Configuration Notes
 
 CE 8.1 notes: See acko-config-reference skill
+
+---
+
+## 9. Template Fix Notice (April 2026)
+
+A recent operator fix re-applies the resolved template to the in-memory cluster spec **after** every `Status().Update`/`Patch`, so template-derived fields (`PodSpec.PodAntiAffinity`, `Resources`, `Storage`) now reach the StatefulSet and persist across reconciles. If you previously worked around this by inlining template values into `spec.overrides`, you can drop those workarounds. `VolumeClaimTemplate` updates remain immutable — VCTs are only set at StatefulSet creation time inside `buildStatefulSet`.

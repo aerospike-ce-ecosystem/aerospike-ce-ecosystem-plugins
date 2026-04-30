@@ -1,0 +1,59 @@
+# Scenario 9: On-Demand Operations (WarmRestart / PodRestart)
+#
+# Description:
+#   Trigger a manual restart on an existing AerospikeCluster without changing
+#   the rest of the spec. Two kinds:
+#     - WarmRestart: sends SIGUSR1 to the aerospike server process.
+#                    Reloads dynamic config; pod is NOT recreated.
+#     - PodRestart:  deletes pods so the StatefulSet recreates them.
+#                    Use when warm restart isn't enough (e.g., changing PodSpec).
+#
+#   The webhook prevents modifying spec.operations[] while the current
+#   operation has status=InProgress. Wait for completion before queueing
+#   another, or change `id` for a fresh operation.
+#
+# Prerequisites:
+#   An AerospikeCluster named "aerospike-basic" already exists and is
+#   in phase=Completed. (Apply 01-minimal.yaml or 02-3node-pv.yaml first.)
+#
+# Apply (patch operations onto an existing cluster):
+#   kubectl patch asc aerospike-basic -n aerospike --type=merge --patch-file=09-operations.yaml
+#
+# Watch progress:
+#   kubectl get asc aerospike-basic -n aerospike -o jsonpath='{.status.operation}' | jq
+#
+# Verify warm restart (uptime resets but pod did NOT restart):
+#   kubectl exec -n aerospike aerospike-basic-0-0 -c aerospike-server -- asinfo -v uptime
+#
+apiVersion: acko.io/v1alpha1
+kind: AerospikeCluster
+metadata:
+  name: aerospike-basic
+  namespace: aerospike
+spec:
+  operations:
+    # Warm restart all pods. SIGUSR1 reloads dynamic config without pod recreate.
+    - kind: WarmRestart
+      id: warm-001                # length 1-20; must be unique-per-cluster
+
+  # ---- Variants (uncomment one at a time, only after the previous completes) ----
+
+  # Warm restart only specific pods:
+  # operations:
+  #   - kind: WarmRestart
+  #     id: warm-rack1-only
+  #     podList:
+  #       - aerospike-basic-1-0
+  #       - aerospike-basic-1-1
+
+  # Full pod restart (delete + recreate via StatefulSet):
+  # operations:
+  #   - kind: PodRestart
+  #     id: pod-restart-001
+
+  # Pod restart targeted at a single pod (e.g., suspected memory leak):
+  # operations:
+  #   - kind: PodRestart
+  #     id: pod-restart-leaky
+  #     podList:
+  #       - aerospike-basic-0-2

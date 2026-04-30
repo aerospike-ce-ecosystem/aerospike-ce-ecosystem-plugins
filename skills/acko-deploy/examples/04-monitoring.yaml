@@ -43,7 +43,9 @@ spec:
     env:                            # Environment variables for the exporter
       - name: AS_STAT_NAMESPACES    # Restrict stats collection to specific namespaces
         value: "test"
-    metricLabels:                   # Custom labels added to all exported metrics
+    metricLabels:                   # Custom labels added to all exported metrics.
+      # Values are TOML-rendered into METRIC_LABELS (double-quote-wrapped, backslashes escaped).
+      # Control chars (\x00-\x1F, \x7F) are rejected by the webhook -- keep values as plain ASCII.
       environment: production
       team: platform
     serviceMonitor:
@@ -72,4 +74,8 @@ spec:
             storageClass: standard
             size: 10Gi
         aerospike:
-          path: /opt/aerospike
+          # Mount under /opt/aerospike/work, NOT /opt/aerospike itself.
+          # Mounting at /opt/aerospike overlays the image's binaries/scripts and
+          # was the source of the April 2026 emptyDir mount bug. Always mount
+          # under a subdirectory.
+          path: /opt/aerospike/work

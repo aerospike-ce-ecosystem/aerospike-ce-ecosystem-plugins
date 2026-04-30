@@ -1,6 +1,6 @@
 ---
 name: aerospike-py-fastapi
-description: "MUST USE for building FastAPI/REST API applications with Aerospike database. Contains production-ready patterns for aerospike-py (Rust/PyO3 async client) that CANNOT be inferred from general knowledge: correct AsyncClient lifespan management, FastAPI Depends injection for client, aerospike_py exception-to-HTTP-status mapping (RecordNotFound→404, RecordExistsError→409, BackpressureError→503), POLICY_EXISTS_CREATE_ONLY/UPDATE_ONLY for CRUD semantics, NamedTuple attribute access (record.bins not tuple unpacking), and global AerospikeError handler. Without this skill, generated code uses wrong import paths, missing DI patterns, and lacks backpressure/metrics/health checks. Triggers on: FastAPI + Aerospike, REST API + aerospike-py, CRUD API with Aerospike, web server/HTTP service backed by Aerospike NoSQL, uvicorn + Aerospike."
+description: "MUST USE for building FastAPI/REST API applications with Aerospike database. Contains production-ready patterns for aerospike-py (Rust/PyO3 async client) that CANNOT be inferred from general knowledge: correct AsyncClient lifespan management, FastAPI Depends injection for client, aerospike_py exception-to-HTTP-status mapping (RecordNotFound→404, RecordExistsError→409, BackpressureError→503, AerospikeTimeoutError→504), POLICY_EXISTS_CREATE_ONLY/UPDATE_ONLY for CRUD semantics, NamedTuple attribute access (record.bins not tuple unpacking), client.ping() readiness probe, batch_read returning dict, batch_write with in_doubt retry signal, and global AerospikeError handler. Without this skill, generated code uses wrong import paths, missing DI patterns, and lacks backpressure/metrics/health checks. Triggers on: FastAPI + Aerospike, REST API + aerospike-py, CRUD API with Aerospike, client.ping() health probe, batch_read/batch_write endpoint, web server/HTTP service backed by Aerospike NoSQL, uvicorn + Aerospike."
 ---
 
 ## 1. App Structure (Lifespan + DI)
@@ -19,10 +19,12 @@ async def lifespan(app: FastAPI):
         "operation_queue_timeout_ms": 5000,
     })
     aerospike_py.init_tracing()                # OpenTelemetry (optional)
+    # aerospike_py.start_metrics_server(port=9464)  # built-in /metrics; pick this OR §6 endpoint, not both
     await client.connect()
     app.state.aerospike = client
     yield
     await client.close()
+    # aerospike_py.stop_metrics_server()
     aerospike_py.shutdown_tracing()
 
 app = FastAPI(lifespan=lifespan)
@@ -72,6 +74,43 @@ async def delete(pk: str, client: AsyncClient = Depends(get_client)):
         return JSONResponse(status_code=404, content={"error": "not found"})
 ```
 
+## 2b. Batch Endpoints
+
+`batch_read` returns `dict[UserKey, AerospikeRecord]` -- iterate with `.items()`. Missing keys are absent from the dict.
+
+```python
+from pydantic import BaseModel
+
+class BatchReadReq(BaseModel):
+    keys: list[str]
+
+@app.post("/records:batchRead")
+async def batch_read(req: BatchReadReq, client: AsyncClient = Depends(get_client)):
+    keys = [(NS, SET, k) for k in req.keys]
+    records = await client.batch_read(keys)            # dict[str, dict[str, Any]]
+    return {"found": records, "missing": [k for k in req.keys if k not in records]}
+
+class BatchWriteItem(BaseModel):
+    key: str
+    bins: dict
+    ttl: int | None = None
+
+@app.post("/records:batchWrite")
+async def batch_write(items: list[BatchWriteItem], client: AsyncClient = Depends(get_client)):
+    records = [
+        ((NS, SET, item.key), item.bins) if item.ttl is None
+        else ((NS, SET, item.key), item.bins, {"ttl": item.ttl})
+        for item in items
+    ]
+    result = await client.batch_write(records)         # BatchWriteResult
+    in_doubt = [str(br.key.user_key) for br in result.batch_records if br.result != 0 and br.in_doubt]
+    failed   = [str(br.key.user_key) for br in result.batch_records if br.result != 0 and not br.in_doubt]
+    if in_doubt:
+        # Some writes may have applied -- caller should reconcile via batch_read, not blind retry
+        return JSONResponse(status_code=503, content={"in_doubt": in_doubt, "failed": failed})
+    return {"failed": failed}
+```
+
 ## 3. Global Error Handler
 
 ```python
@@ -92,19 +131,21 @@ async def aerospike_error_handler(request, exc):
 | `RecordExistsError` | 409 | Record already exists (CREATE_ONLY) |
 | `RecordGenerationError` | 409 | Optimistic lock conflict |
 | `BackpressureError` | 503 | Too many concurrent operations |
-| `AerospikeTimeoutError` | 504 | Operation timed out |
+| `AerospikeTimeoutError` | 504 | Operation timed out (canonical name; `TimeoutError` alias removed) |
+| `AerospikeIndexError` | 400/500 | Secondary index error (400 if user supplied bad query, else 500) |
 | `AerospikeError` | 500 | Catch-all server error |
 
 ## 5. Health Check
 
 ```python
-@app.get("/health")
-async def health(client: AsyncClient = Depends(get_client)):
-    try:
-        nodes = client.get_node_names()   # sync call, NOT awaitable
-        return {"status": "ok", "nodes": len(nodes)}
-    except Exception:
-        return JSONResponse(status_code=503, content={"status": "unhealthy"})
+@app.get("/health/ready")
+async def ready(client: AsyncClient = Depends(get_client)):
+    # ping() does an info("build") round-trip; never raises -- returns False on failure.
+    return {"status": "ok"} if await client.ping() else JSONResponse(503, {"status": "unhealthy"})
+
+@app.get("/health/live")
+async def live():
+    return {"status": "ok"}  # liveness should NOT depend on Aerospike (avoids restart loops on transient blip)
 ```
 
 ## 6. Metrics Endpoint
@@ -128,7 +169,10 @@ Or use the built-in server: `aerospike_py.start_metrics_server(port=9464)` in li
 - **DI**: Use `Depends(get_client)` for every endpoint — never create client per-request
 - **Exceptions on module**: `aerospike_py.RecordNotFound` (NOT `aerospike_py.exception.RecordNotFound`)
 - **NamedTuple returns**: `record.bins`, `record.meta.gen` (NOT tuple unpacking)
-- **get_node_names()**: Always sync, even on AsyncClient
+- **batch_read**: returns `dict[UserKey, AerospikeRecord]` — iterate with `.items()`, missing keys are absent
+- **batch_write**: inspect `BatchRecord.in_doubt` before retrying non-idempotent writes
+- **Health probe**: `await client.ping()` for readiness; trivial 200 OK for liveness
 - **Backpressure**: Set `max_concurrent_operations` to prevent connection pool exhaustion
+- **Exception name**: `AerospikeTimeoutError` (legacy `TimeoutError` alias removed)
 
-Detail: `../aerospike-py-api/reference/client-config.md` | `../aerospike-py-api/reference/admin.md`
+Detail: `../aerospike-py-api/reference/client-config.md` | `../aerospike-py-api/reference/admin.md` | `../aerospike-py-api/reference/health.md` | `../aerospike-py-api/reference/write.md`

@@ -69,3 +69,24 @@ Complete field reference for the AerospikeCluster Custom Resource.
 | `monitoring.prometheusRule` | object | Custom PrometheusRule alert definitions |
 | `aerospikeAccessControl` | object | Roles and users for ACL |
 | `aerospikeNetworkPolicy` | object | Access type configuration (pod/hostInternal/hostExternal) |
+
+## On-Demand Operations (`spec.operations[]`)
+
+Trigger manual restarts without otherwise changing the spec. The webhook prevents modifying the operations list while one operation is `InProgress`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `spec.operations[].kind` | enum | `WarmRestart` (sends SIGUSR1 to the aerospike process, no pod recreate) or `PodRestart` (delete + recreate pods) |
+| `spec.operations[].id` | string | Unique-per-cluster id, length 1–20 chars. Identifies one operation across reconciles. |
+| `spec.operations[].podList` | list[string] | Optional. Subset of pod names to target. Omit to apply to all pods. |
+| `status.operation.phase` | enum | `InProgress` / `Completed` / `Error` |
+| `status.operation.completedPods` | list[string] | Pods that finished successfully |
+| `status.operation.failedPods` | list[string] | Pods that errored |
+
+## Status Fields (selected)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `status.phase` | enum | `""`, `Pending`, `Completed`, `Error`, `Paused`, `ConfigDegraded` (April 2026) |
+| `status.conditions[]` | list | Includes `ReconcileHealthy`, `DynamicConfigDegraded`, `ReconciliationPaused` (full reference in `acko-config-reference/reference/conditions-and-phases.md`) |
+| `status.pods[].dynamicConfigChanges[]` | list | Per-path tracking from last 2PC dynamic config attempt: `path`, `oldValue`, `newValue`, `result` ∈ {`Applied`,`Failed`,`Pending`,`RolledBack`,`RollbackFailed`} |

@@ -36,6 +36,18 @@
       "prompt": "Add proper error handling to the FastAPI app: 404 for not found, 409 for duplicates, 503 for connection issues",
       "expected_output": "Correct HTTP status codes returned",
       "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "An Aerospike cluster has fallen into phase=ConfigDegraded. The dynamic config rollback appears to have failed -- walk me through recovery",
+      "expected_output": "Inspect the DynamicConfigDegraded condition and status.pods[*].dynamicConfigChanges, then advise the user NOT to toggle enableDynamicConfigUpdate but to let the operator cold-restart on the next reconcile. If the loop persists, recommend reverting the spec to a known-good value",
+      "files": []
+    },
+    {
+      "id": 8,
+      "prompt": "Implement a FastAPI readiness probe using client.ping() and add an endpoint that creates multiple records via batch_write. If any record is in_doubt, signal 503 so the client reconciles state",
+      "expected_output": "/health/ready uses await client.ping(); /records:batchWrite calls client.batch_write(...); inspects BatchRecord.in_doubt and returns 503 when any in_doubt items are present, else a normal response",
+      "files": []
     }
   ]
 }

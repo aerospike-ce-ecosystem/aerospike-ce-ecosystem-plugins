@@ -1,6 +1,6 @@
 # Kubernetes Events Reference
 
-Complete list of all 37 Kubernetes events emitted by the ACKO operator.
+Catalog of Kubernetes events emitted by the ACKO operator. Count grows over releases — see sections below.
 
 ---
 
@@ -34,6 +34,16 @@ Complete list of all 37 Kubernetes events emitted by the ACKO operator.
 | `ConfigMapUpdated` | Normal | ConfigMap contents updated |
 | `DynamicConfigApplied` | Normal | Dynamic config change (set-config) succeeded |
 | `DynamicConfigStatusFailed` | Warning | Dynamic config change failed |
+
+### Dynamic Config 2-Phase Commit (April 2026)
+
+| Event Reason | Type | When Emitted |
+|---|---|---|
+| `DynamicConfigValidationFailed` | Warning | Phase 1 (validate-all) rejected the change on at least one pod; whole update aborted before any pod is mutated |
+| `DynamicConfigRollbackTriggered` | Warning | Phase 2 apply failed on a pod; LIFO rollback started across already-updated pods |
+| `DynamicConfigRollbackFailed` | Warning | Rollback itself failed; cluster transitioning to `phase=ConfigDegraded` |
+| `DynamicConfigDegraded` | Warning | `ConditionDynamicConfigDegraded=True` set; cold restart will be attempted on next reconcile |
+| `DynamicConfigRecovered` | Normal | `ConfigDegraded` resolved (cold restart converged to spec) |
 
 ---
 
@@ -99,12 +109,20 @@ Complete list of all 37 Kubernetes events emitted by the ACKO operator.
 
 ---
 
-## Circuit Breaker Events
+## Circuit Breaker / Permanent Error Events
 
 | Event Reason | Type | When Emitted |
 |---|---|---|
-| `CircuitBreakerActive` | Warning | 10+ consecutive reconciliation failures; exponential backoff applied |
+| `CircuitBreakerActive` | Warning | Reconcile failure threshold reached (transient errors → exponential backoff) |
 | `CircuitBreakerReset` | Normal | Successful reconciliation; circuit breaker reset |
+| `PermanentError` | Warning | Validation/configgen/secret error detected; `ConditionReconcileHealthy=False` (`Reason=PermanentError`); `failedReconcileCount` pinned at max with NO retry |
+
+## Pause / Resume Events
+
+| Event Reason | Type | When Emitted |
+|---|---|---|
+| `ClusterPaused` | Normal | `spec.paused=true` observed; reconciliation suspended; `ConditionReconciliationPaused=True` |
+| `ClusterResumed` | Normal | `spec.paused` cleared; `failedReconcileCount`/`lastReconcileError` cleared; `ConditionReconciliationPaused=False` |
 
 ---
 

@@ -9,11 +9,15 @@ Symptom-based diagnostic reference for ACKO Aerospike clusters.
 | Symptom | Diagnostic Command | Likely Cause | Resolution |
 |---------|-------------------|--------------|------------|
 | Phase = `Error` | `kubectl get asc <name> -o jsonpath='{.status.lastReconcileError}'` | Invalid config, image pull failure, resource exhaustion | Read the error message, fix the root cause, re-apply the CR |
+| Phase = `ConfigDegraded` | `kubectl get asc <name> -o jsonpath='{.status.pods[*].dynamicConfigChanges}' \| jq` | 2PC dynamic config rollback failed; pods inconsistent | Do NOT toggle `enableDynamicConfigUpdate`; let the operator cold-restart on next reconcile. If the loop continues, revert spec to known-good values |
 | Phase = `WaitingForMigration` | `kubectl exec <pod> -c aerospike-server -- asinfo -v 'statistics' \| tr ';' '\n' \| grep migrate` | Data migration in progress (normal during scale-down) | Wait for completion (operator auto-proceeds) |
 | `InProgress` stuck > 5 min | `kubectl get pvc -n <ns> -l aerospike.io/cr-name=<name>` | PVC Pending, ImagePull failure, scheduling failure | Check StorageClass, image name, resource availability |
-| `CircuitBreakerActive` event | `kubectl get asc <name> -o jsonpath='{.status.failedReconcileCount}'` | 10+ consecutive reconciliation failures | Check `lastReconcileError`, fix root cause (auto-retries with backoff) |
+| `CircuitBreakerActive` (transient) | `kubectl get asc <name> -o jsonpath='{.status.conditions[?(@.type=="ReconcileHealthy")]}'` returns `status=True` | Reconcile failure threshold reached | Fix transient cause; operator auto-retries with backoff |
+| `ReconcileHealthy=False, reason=PermanentError` | Same jsonpath returns `status=False, reason=PermanentError` | Validation/configgen/secret error; no auto-retry | Fix root cause; toggle `paused: true → null` to clear stale `failedReconcileCount`/`lastReconcileError` (or edit spec to retrigger) |
+| Operations stuck `InProgress`, webhook rejects new edit | `kubectl get asc <name> -o jsonpath='{.status.operation.phase}'` | Cannot modify `spec.operations[]` while one is `InProgress` | Wait for the in-flight operation to complete or fail; only then queue the next |
 | Pod `CrashLoopBackOff` | `kubectl logs <pod> -c aerospike-server --previous` | Config parse error, OOM, invalid parameters | Check server logs, fix aerospikeConfig |
-| Webhook rejects CR | Read `kubectl apply` error output | CE constraint violation (size>8, namespaces>2, enterprise image, xdr/tls) | Fix the CR to comply with CE constraints |
+| Webhook rejects CR (`service`/`network` not a map, etc.) | Read `kubectl apply` error output | Strengthened webhook (April 2026) — wrong YAML shape | Make `aerospikeConfig.service`/`network` maps; `logging` a list; namespace entries maps with `name` key |
+| Webhook rejects CR (CE constraint) | Read `kubectl apply` error output | CE constraint violation (size>8, namespaces>2, enterprise image, xdr/tls) | Fix the CR to comply with CE constraints |
 | `dynamicConfigStatus=Failed` | `kubectl get asc <name> -o jsonpath='{.status.pods}' \| jq '.[].dynamicConfigStatus'` | Parameter is not dynamically changeable | Set `enableDynamicConfigUpdate: false` to force rolling restart |
 | `ReadinessGateBlocking` | `kubectl get pod <pod> -o jsonpath='{.status.conditions}' \| jq '.[]'` | Readiness gate not satisfied | Check if Aerospike server is healthy inside the pod |
 
