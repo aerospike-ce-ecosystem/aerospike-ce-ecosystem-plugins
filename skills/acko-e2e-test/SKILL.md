@@ -137,6 +137,27 @@ Each row corresponds to a Ginkgo `Context` in `test/e2e/`. Status = green/red of
 - [ ] CE constraint violations are rejected at admission: `size>8`, `namespaces>2`, `network.tls`, `xdr`, enterprise image (`aerospike-server-enterprise`), `feature-key-file`. Each must surface a clear error string.
 - [ ] Duplicate ServiceMonitor when `monitoring.enabled=true` is rejected (added in #235).
 
+### Logging + tracing runtime (UI api pod)
+
+These are NOT in `test/e2e/` Ginkgo. They run against a live `helm install` and confirm the cluster-manager api's logging stack works as intended. Both are required before any release that ships UI api changes.
+
+- [ ] **Default log format is text** — `helm install` with no overrides puts `LOG_FORMAT=text`. `kubectl logs <ui-api>` shows `2026-... INFO [logger] message` lines, not JSON.
+- [ ] **`LOG_FORMAT=json` produces structured logs** — `helm upgrade --reuse-values --set ui.env.logFormat=json` makes the api emit one JSON object per record. Each line has `timestamp`, `level`, `logger`, `message`, `request_id`.
+- [ ] **X-Request-ID correlation** — `curl -H "X-Request-ID: <id>" http://<ui-api-svc>/api/health` produces a JSON log line whose `request_id` field equals `<id>`, AND the response carries `x-request-id: <id>` so the caller can correlate without server access.
+- [ ] **`OTEL_SDK_DISABLED=true` (default)** — pod env shows `OTEL_SDK_DISABLED=true`. No `OTEL_EXPORTER_OTLP_*` env, no outbound traffic to common collector ports (4317/4318) — Section 5 has a tcpdump check for the latter.
+- [ ] **OTel opt-in** (skip until cluster-manager PR #262 is merged) — `helm upgrade --set ui.api.otel.enabled=true,ui.api.otel.endpoint=http://<collector>:4317` flips `OTEL_SDK_DISABLED=false` and adds `OTEL_EXPORTER_OTLP_ENDPOINT`. Once #262 is merged, JSON logs additionally carry `otelTraceID` / `otelSpanID` (currently absent — image at `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api:latest` does not bundle the OTel hook code).
+
+Quick recipe:
+
+```bash
+NS=aerospike-operator
+POD=$(kubectl get pod -n $NS -l app.kubernetes.io/component=ui-api -o jsonpath='{.items[0].metadata.name}')
+kubectl port-forward -n $NS svc/acko-aerospike-ce-kubernetes-operator-ui-api 18000:80 &
+sleep 2
+curl -sI -H "X-Request-ID: my-trace-001" http://localhost:18000/api/health | grep -i x-request-id   # response header
+kubectl logs -n $NS $POD -c api --since=30s | grep my-trace-001                                       # log correlation
+```
+
 ---
 
 ## 4. Helm Chart Scenarios — `helm template` + `helm lint`
