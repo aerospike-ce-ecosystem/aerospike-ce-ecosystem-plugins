@@ -1,263 +1,191 @@
 # Observability Reference
 
+Prometheus metrics + OpenTelemetry tracing for `aerospike-py`. Both are built into the Rust core and exposed through plain Python helpers — no extra service mesh required to get end-to-end visibility.
+
 ## Table of Contents
-- [Logging](#logging)
+- [Quick Start](#quick-start)
 - [Prometheus Metrics](#prometheus-metrics)
 - [OpenTelemetry Tracing](#opentelemetry-tracing)
+- [FastAPI Integration](#fastapi-integration)
+- [Environment Variables](#environment-variables)
+- [Logging](#logging)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
-## Logging
-
-Built-in Rust-to-Python logging bridge that forwards all internal Rust logs to Python's `logging` module. Initialized automatically on import.
-
-### Log Levels
-
-| Constant | Value | Python Level | Description |
-|----------|-------|--------------|-------------|
-| LOG_LEVEL_OFF | -1 | (disabled) | No logging |
-| LOG_LEVEL_ERROR | 0 | ERROR (40) | Errors only |
-| LOG_LEVEL_WARN | 1 | WARNING (30) | Warnings and above |
-| LOG_LEVEL_INFO | 2 | INFO (20) | Info and above (default) |
-| LOG_LEVEL_DEBUG | 3 | DEBUG (10) | Debug and above |
-| LOG_LEVEL_TRACE | 4 | TRACE (5) | All messages (verbose) |
-
-### API
-
-| Function | Description |
-|----------|-------------|
-| set_log_level(level: int) | Set Rust logger level |
-| dropped_log_count() -> int | Total logs dropped due to bridge back-pressure (slow Python sink) |
+## Quick Start
 
 ```python
-import logging
 import aerospike_py
 
-logging.basicConfig(level=logging.DEBUG)
-aerospike_py.set_log_level(aerospike_py.LOG_LEVEL_DEBUG)
+aerospike_py.start_metrics_server(port=9464)   # Prometheus /metrics endpoint
+aerospike_py.init_tracing()                    # OTLP gRPC exporter via OTEL_* env
 
-# Periodically check for dropped logs to detect a slow logging sink
-if aerospike_py.dropped_log_count() > 0:
-    logging.warning("aerospike-py dropped %d log records", aerospike_py.dropped_log_count())
+# ... your client work happens with metrics + traces auto-collected ...
+
+aerospike_py.shutdown_tracing()                # flush spans before exit
+aerospike_py.stop_metrics_server()
 ```
 
-### Logger Names
-
-| Logger | Description |
-|--------|-------------|
-| `aerospike_core::cluster` | Cluster discovery, node management |
-| `aerospike_core::batch` | Batch operation execution |
-| `aerospike_core::command` | Individual command execution |
-| `aerospike_py` | Python-side client wrapper |
-
-```python
-# Fine-grained control
-logging.getLogger("aerospike_core::cluster").setLevel(logging.DEBUG)
-logging.getLogger("aerospike_core::batch").setLevel(logging.WARNING)
-```
-
-### JSON Logging Setup
-
-```python
-import logging, json
-
-class JSONFormatter(logging.Formatter):
-    def format(self, record):
-        return json.dumps({
-            "timestamp": self.formatTime(record),
-            "level": record.levelname,
-            "logger": record.name,
-            "message": record.getMessage(),
-        })
-
-handler = logging.StreamHandler()
-handler.setFormatter(JSONFormatter())
-logger = logging.getLogger("aerospike_core")
-logger.addHandler(handler)
-logger.setLevel(logging.DEBUG)
-```
-
-### Disabling
-
-```python
-aerospike_py.set_log_level(aerospike_py.LOG_LEVEL_OFF)
-```
+`start_metrics_server` only takes `port` (binds on all interfaces — there is no `addr=` argument). Default is `9464` (the OpenMetrics conventional port). Both functions are thread-safe and idempotent.
 
 ---
 
 ## Prometheus Metrics
 
-Operation-level metrics collected in Rust and exposed in Prometheus text format. Metric names follow OpenTelemetry DB Client Semantic Conventions.
+Operation-level metrics collected in Rust, exposed in Prometheus text format. Metric names follow OpenTelemetry DB Client Semantic Conventions.
 
 ### API
 
 | Function | Description |
 |----------|-------------|
-| start_metrics_server(port=9464) | Start background HTTP server at `/metrics` |
-| get_metrics() -> str | Get current metrics in Prometheus text format |
-| stop_metrics_server() | Stop the metrics server |
-| set_metrics_enabled(enabled: bool) | Enable/disable metrics collection. Useful for benchmarking without overhead. |
-| is_metrics_enabled() -> bool | Check if metrics collection is currently enabled |
+| `start_metrics_server(port=9464)` | Background HTTP server at `http://<host>:<port>/metrics` |
+| `stop_metrics_server()` | Shut down the metrics server |
+| `get_metrics() -> str` | Snapshot the current metrics as Prometheus text |
+| `set_metrics_enabled(enabled: bool)` | Toggle collection (~1 ns when disabled, useful for benchmarks) |
+| `is_metrics_enabled() -> bool` | Current state |
 
-```python
-import aerospike_py
+### Metric: `db_client_operation_duration_seconds`
 
-# Get metrics as string
-text: str = aerospike_py.get_metrics()
+Histogram. Labels: `db_system_name` (always `aerospike`), `db_namespace`, `db_collection_name`, `db_operation_name`, `error_type` (empty on success, exception name on failure). Buckets: `0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0` seconds.
 
-# Or start a built-in HTTP server
-aerospike_py.start_metrics_server(port=9464)
-# Prometheus scrapes http://localhost:9464/metrics
+Instrumented operations: `put`, `get`, `select`, `exists`, `remove`, `touch`, `append`, `prepend`, `increment`, `operate`, `batch_read`, `batch_operate`, `batch_remove`, `batch_write`, `query`. (`exists()` treats `KeyNotFoundError` as success.)
 
-# Stop when done
-aerospike_py.stop_metrics_server()
+### Example output
+
+```
+# HELP db_client_operation_duration_seconds Aerospike client operation latency
+# TYPE db_client_operation_duration_seconds histogram
+db_client_operation_duration_seconds_bucket{db_namespace="test",db_collection_name="users",db_operation_name="put",error_type="",le="0.001"} 142
+db_client_operation_duration_seconds_count{...} 192
+db_client_operation_duration_seconds_sum{...} 0.214
 ```
 
-### Metric: `db_client_operation_duration_seconds` (histogram)
-
-**Labels:**
-
-| Label | Examples |
-|-------|---------|
-| db_system_name | `aerospike` |
-| db_namespace | `test`, `production` |
-| db_collection_name | `users`, `sessions` |
-| db_operation_name | `get`, `put`, `delete`, `query` |
-| error_type | `""` (success), `Timeout`, `KeyNotFoundError` |
-
-**Buckets:** `0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0` seconds
-
-**Instrumented operations:** `put`, `get`, `select`, `exists`, `remove`, `touch`, `append`, `prepend`, `increment`, `operate`, `batch_read`, `batch_operate`, `batch_remove`, `query`
-
-Note: `exists()` treats `KeyNotFoundError` as success since "not found" is a normal outcome.
-
-### PromQL Examples
+### PromQL recipes
 
 ```promql
-# Average latency (5m)
-rate(db_client_operation_duration_seconds_sum[5m])
-/ rate(db_client_operation_duration_seconds_count[5m])
+# P99 latency by operation
+histogram_quantile(0.99, sum by (db_operation_name, le) (rate(db_client_operation_duration_seconds_bucket[5m])))
 
-# P99 latency
-histogram_quantile(0.99, rate(db_client_operation_duration_seconds_bucket[5m]))
-
-# Error rate by type
+# Error rate by error_type
 sum by (error_type) (rate(db_client_operation_duration_seconds_count{error_type!=""}[5m]))
 
 # Ops/sec by namespace
-sum by (db_namespace, db_operation_name) (rate(db_client_operation_duration_seconds_count[1m]))
+sum by (db_namespace) (rate(db_client_operation_duration_seconds_count[1m]))
 ```
-
-### Grafana Dashboard Panels
-
-| Panel | PromQL | Type |
-|-------|--------|------|
-| Ops/sec | `sum(rate(..._count[1m])) by (db_operation_name)` | Time series |
-| P50/P95/P99 | `histogram_quantile(0.5\|0.95\|0.99, rate(..._bucket[5m]))` | Time series |
-| Error Rate | `sum(rate(..._count{error_type!=""}[1m])) by (error_type)` | Time series |
-| By Namespace | `sum(rate(..._count[1m])) by (db_namespace)` | Pie chart |
-
-### Performance
-
-| Scenario | Overhead |
-|----------|----------|
-| Per-operation recording | ~30-80 ns (atomic increment) |
-| `set_metrics_enabled(False)` | ~1 ns (atomic check, useful for benchmarks) |
-| Relative to network round-trip | 0.001-0.01% |
-| `get_metrics()` encoding | ~50-200 us |
-
-Metrics collection is enabled by default. Toggle off via `set_metrics_enabled(False)` for benchmark runs.
 
 ---
 
 ## OpenTelemetry Tracing
 
-Built-in OpenTelemetry tracing for every data operation. Spans follow Database Client Semantic Conventions and export via OTLP gRPC.
-
-### Setup
-
-```bash
-pip install aerospike-py            # tracing built-in
-pip install aerospike-py[otel]      # + context propagation from Python spans
-```
-
-### API
-
-| Function | Description |
-|----------|-------------|
-| init_tracing() | Initialize OTel tracing (reads `OTEL_*` env vars) |
-| shutdown_tracing() | Flush and shut down. Call before process exit. |
-
-Both are thread-safe and idempotent.
-
 ```python
-import aerospike_py
-
-aerospike_py.init_tracing()
-
-client = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]}).connect()
-client.put(("test", "users", "user1"), {"name": "Alice"})
-client.get(("test", "users", "user1"))
-client.close()
-
-aerospike_py.shutdown_tracing()
+aerospike_py.init_tracing()      # reads OTEL_* env, sets up OTLP gRPC exporter
+aerospike_py.shutdown_tracing()  # flush pending spans; call before process exit
 ```
 
-### Environment Variables
+Both calls are no-ops if `OTEL_SDK_DISABLED=true` is set. With `pip install aerospike-py[otel]`, W3C TraceContext is propagated from any active Python span — your aerospike spans become children of the FastAPI/Starlette/httpx parent automatically.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| OTEL_EXPORTER_OTLP_ENDPOINT | `http://localhost:4317` | OTLP gRPC endpoint |
-| OTEL_SERVICE_NAME | `aerospike-py` | Service name for spans |
-| OTEL_SDK_DISABLED | `false` | Disable tracing entirely |
-| OTEL_TRACES_EXPORTER | `otlp` | Set to `none` to disable export |
-
-### Span Attributes
+### Span attributes
 
 | Attribute | Example |
 |-----------|---------|
-| db.system.name | `aerospike` |
-| db.namespace | `test` |
-| db.collection.name | `users` |
-| db.operation.name | `PUT`, `GET`, `REMOVE` |
+| `db.system.name` | `aerospike` |
+| `db.namespace` | `test` |
+| `db.collection.name` | `users` |
+| `db.operation.name` | `PUT`, `GET`, `BATCH_READ` |
+| `error.type` | (on failure) `RecordNotFound` |
 
-**Span name:** `{OPERATION} {namespace}.{set}` (e.g., `PUT test.users`)
+Span name is `{OPERATION} {namespace}.{set}` (e.g. `PUT test.users`).
 
-**On error:** `error.type`, `db.response.status_code`, `otel.status_code=ERROR`
+**On error**: in addition to `error.type`, the span sets `db.response.status_code` (Aerospike server status code) and the span status to `ERROR` (`otel.status_code=ERROR`).
 
-**Instrumented:** `put`, `get`, `select`, `exists`, `remove`, `touch`, `append`, `prepend`, `increment`, `operate`, `batch_read`, `batch_operate`, `batch_remove`, `query`
+---
 
-### W3C TraceContext Propagation
+## FastAPI Integration
 
-With `aerospike-py[otel]` installed, W3C TraceContext is automatically propagated from Python active spans to Rust spans:
+Wire metrics + tracing into your app's lifespan so they boot and shut down with the server.
 
-| Setup | Behavior |
-|-------|----------|
-| `aerospike-py[otel]` + active span | Python span becomes parent |
-| `aerospike-py[otel]` + no active span | Root span created |
-| `aerospike-py` (base) | Root span (no propagation) |
+```python
+from contextlib import asynccontextmanager
 
-### Disabling
+import aerospike_py
+from aerospike_py import AsyncClient
+from fastapi import FastAPI
 
-```bash
-export OTEL_SDK_DISABLED=true          # disable entirely
-export OTEL_TRACES_EXPORTER=none       # spans created but not exported
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Boot observability before opening the client so connect() spans are captured.
+    aerospike_py.start_metrics_server(port=9464)
+    aerospike_py.init_tracing()  # OTLP exporter via OTEL_EXPORTER_OTLP_ENDPOINT
+
+    client = AsyncClient({"hosts": [("aerospike", 3000)], "max_concurrent_operations": 64})
+    await client.connect()
+    app.state.aerospike = client
+
+    yield
+
+    await client.close()
+    aerospike_py.shutdown_tracing()
+    aerospike_py.stop_metrics_server()
+
+
+app = FastAPI(lifespan=lifespan)
 ```
 
-### Graceful Degradation
+The metrics server runs on its own daemon thread (separate port from your FastAPI server) — Prometheus scrapes `http://<pod>:9464/metrics`. If you must serve `/metrics` from the FastAPI port instead, expose your own route returning `aerospike_py.get_metrics()` and skip `start_metrics_server()`:
 
-| Scenario | Behavior |
-|----------|----------|
-| OTLP endpoint unreachable | Warning log, tracing disabled |
-| `init_tracing()` not called | No-op spans |
-| `opentelemetry-api` not installed | Root spans (no propagation) |
-| `shutdown_tracing()` not called | Some pending spans may be lost |
+```python
+from fastapi.responses import PlainTextResponse
 
-### Performance
+@app.get("/metrics")
+def metrics() -> PlainTextResponse:
+    return PlainTextResponse(aerospike_py.get_metrics(), media_type="text/plain; version=0.0.4")
+```
 
-| Scenario | Overhead |
-|----------|----------|
-| Span creation | ~1-5 us |
-| Context propagation | ~10-50 us |
-| vs network round-trip | < 1% |
-| `OTEL_SDK_DISABLED=true` | ~30-80 ns (metrics only) |
+---
+
+## Environment Variables
+
+`aerospike-py` honors the standard OpenTelemetry environment variables. No client-side knobs — configure via env to keep deployments declarative.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `OTEL_SERVICE_NAME` | `aerospike-py` | Service name on every span |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`[^otlp-endpoint] | `http://localhost:4317` | OTLP gRPC collector endpoint |
+| `OTEL_TRACES_EXPORTER` | `otlp` | Set to `none` to keep span creation but disable export |
+| `OTEL_SDK_DISABLED` | `false` | Disable tracing entirely (init_tracing becomes a no-op) |
+| `AEROSPIKE_PY_INTERNAL_METRICS` | `0` | Set `1` to enable internal stage profiling on startup |
+
+[^otlp-endpoint]: `OTEL_EXPORTER_OTLP_ENDPOINT` is not read directly by `aerospike-py`; it is consumed transparently by the underlying `opentelemetry-otlp` exporter. Only `OTEL_SDK_DISABLED`, `OTEL_TRACES_EXPORTER`, and `OTEL_SERVICE_NAME` are explicitly inspected by the Rust core.
+
+Compose / Kubernetes example:
+
+```yaml
+env:
+  - { name: OTEL_SERVICE_NAME,           value: "checkout-api" }
+  - { name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://otel-collector:4317" }
+```
+
+---
+
+## Logging
+
+Rust-to-Python logging bridge (forwarded to the standard `logging` module).
+
+```python
+aerospike_py.set_log_level(aerospike_py.LOG_LEVEL_DEBUG)   # OFF=-1, ERR=0, WARN=1, INFO=2, DBG=3, TRACE=4
+aerospike_py.dropped_log_count()                            # back-pressure counter for slow sinks
+```
+
+Logger names: `aerospike_core::cluster`, `aerospike_core::batch`, `aerospike_core::command`, `aerospike_py`.
+
+---
+
+## Troubleshooting
+
+- **`/metrics` returns empty histograms** — no operations have run yet, or `set_metrics_enabled(False)` is in effect. Issue a single `put`/`get` and re-scrape.
+- **No spans in collector** — verify `OTEL_EXPORTER_OTLP_ENDPOINT` is reachable (gRPC, default port `4317`). `init_tracing()` logs a warning and silently disables on connection failure; check the `aerospike_py` logger at `INFO`.
+- **Spans are root, not children of my Python span** — install the OTel extra: `pip install aerospike-py[otel]`. Without it the Rust core cannot read W3C TraceContext from the active Python span.
+- **`start_metrics_server` raises `OSError: address already in use`** — another process holds the port; pick a free one or call `stop_metrics_server()` first. Same-port restarts within the same process are handled automatically.
+- **Pending spans lost on shutdown** — always call `aerospike_py.shutdown_tracing()` from your lifespan/atexit handler. The OTLP exporter buffers spans and flushes on shutdown.
