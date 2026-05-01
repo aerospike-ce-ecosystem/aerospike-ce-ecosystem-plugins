@@ -1,0 +1,29 @@
+{
+  "ignorePatterns": [
+    { "pattern": "^https?://localhost(:[0-9]+)?(/.*)?$" },
+    { "pattern": "^https?://127\\.0\\.0\\.1(:[0-9]+)?(/.*)?$" },
+    { "pattern": "^https?://0\\.0\\.0\\.0(:[0-9]+)?(/.*)?$" },
+    { "pattern": "^https?://([a-z0-9-]+\\.)*svc(\\.cluster\\.local)?(:[0-9]+)?(/.*)?$" },
+    { "pattern": "^mailto:" },
+    { "pattern": "^https://github.com/aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins/(releases/tag|compare)/v[0-9]+\\.[0-9]+\\.[0-9]+" }
+  ],
+  "replacementPatterns": [
+    {
+      "pattern": "^/",
+      "replacement": "{{BASEURL}}/"
+    }
+  ],
+  "httpHeaders": [
+    {
+      "urls": ["https://github.com/", "https://api.github.com/"],
+      "headers": {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      }
+    }
+  ],
+  "timeout": "20s",
+  "retryOn429": true,
+  "retryCount": 3,
+  "fallbackRetryDelay": "30s",
+  "aliveStatusCodes": [200, 206, 301, 302, 303, 307, 308, 429]
+}
