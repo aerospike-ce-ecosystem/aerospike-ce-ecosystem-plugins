@@ -42,23 +42,35 @@ kubectl get pod -n $NS -o jsonpath='{.items[*].metadata.annotations.acko\.io/con
 ## End-to-end Helm install (real user path)
 
 ```bash
-# Build + load operator image (Podman is the project default)
+# 1. Build operator image (Podman is the project default)
 make docker-build IMG=acko-controller:e2e CONTAINER_TOOL=podman
-kind load docker-image acko-controller:e2e --name aerospike-ce-kubernetes-operator-test-e2e
 
-# CRDs are not packaged in the chart by default — install them first
-make install
+# 2. Load image into Kind via tarball — `kind load docker-image` is unreliable
+#    on the kind+podman provider; the tarball path works everywhere.
+podman save -o /tmp/acko-controller-e2e.tar localhost/acko-controller:e2e
+KIND_EXPERIMENTAL_PROVIDER=podman \
+  kind load image-archive /tmp/acko-controller-e2e.tar \
+  --name aerospike-ce-kubernetes-operator-test-e2e
 
-# Install the chart exactly as a user would
+# 3. cert-manager is REQUIRED — chart renders Certificate/Issuer for the webhook
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.19.3/cert-manager.yaml
+kubectl wait deployment/cert-manager-webhook --for=condition=Available -n cert-manager --timeout=5m
+sleep 10
+
+# 4. Helm install — CRDs come from the aerospike-ce-kubernetes-operator-crds
+#    subchart, so do NOT run `make install` first (it would block helm
+#    install with an ownership-label mismatch).
 helm install acko ./charts/aerospike-ce-kubernetes-operator \
   --namespace aerospike-operator --create-namespace \
-  --set image.repository=acko-controller --set image.tag=e2e --set image.pullPolicy=Never \
+  --set image.repository=localhost/acko-controller \
+  --set image.tag=e2e \
+  --set image.pullPolicy=Never \
   --wait --timeout 5m
 
-# Real-user smoke (helm-bundled tests)
+# 5. Real-user smoke (helm-bundled tests)
 helm test acko -n aerospike-operator
 
-# Tear down via helm (mirrors uninstall flow)
+# 6. Tear down via helm (mirrors uninstall flow)
 helm uninstall acko -n aerospike-operator
 kubectl delete ns aerospike-operator
 ```

@@ -34,24 +34,43 @@ Forbidden during e2e (these bypass the chart entirely):
 Required setup (run after `make setup-test-e2e` brings up the Kind cluster):
 
 ```bash
-# 1. Build and load the operator image into Kind
+# 1. Build and load the operator image into Kind.
+#    Kind+podman provider does not pick up `kind load docker-image` reliably,
+#    so use the tarball path which works on every Kind+podman combination.
 make docker-build IMG=acko-controller:e2e CONTAINER_TOOL=podman
-kind load docker-image acko-controller:e2e --name aerospike-ce-kubernetes-operator-test-e2e
+podman save -o /tmp/acko-controller-e2e.tar localhost/acko-controller:e2e
+KIND_EXPERIMENTAL_PROVIDER=podman \
+  kind load image-archive /tmp/acko-controller-e2e.tar \
+  --name aerospike-ce-kubernetes-operator-test-e2e
+# Verify image is on every node (control-plane + 3 workers in the default kind-config):
+for n in $(kubectl get nodes -o name | sed 's|node/||'); do
+  podman exec "$n" crictl images | grep acko-controller
+done
 
-# 2. Install CRDs (the chart does not bundle CRDs by default for safety)
-make install
+# 2. Install cert-manager — required by the chart's webhook Certificate / Issuer
+#    resources. Pinned to the same version test/utils/utils.go uses.
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.19.3/cert-manager.yaml
+kubectl wait deployment/cert-manager-webhook --for=condition=Available -n cert-manager --timeout=5m
+sleep 10  # webhook CA still propagating after Available=true
 
-# 3. Helm install the operator chart — exactly as a user would
+# 3. Helm install — the chart's aerospike-ce-kubernetes-operator-crds subchart
+#    bundles CRDs, so DO NOT run `make install` first (it would create
+#    CRDs without helm ownership labels and the helm install would refuse to
+#    take them over).
 helm install acko ./charts/aerospike-ce-kubernetes-operator \
   --namespace aerospike-operator --create-namespace \
-  --set image.repository=acko-controller --set image.tag=e2e \
+  --set image.repository=localhost/acko-controller \
+  --set image.tag=e2e \
   --set image.pullPolicy=Never \
   --wait --timeout 5m
 
 # 4. Verify it came up via the chart, not via leftover state
-kubectl get deploy -n aerospike-operator -l app.kubernetes.io/instance=acko
-helm list -n aerospike-operator
+helm list -n aerospike-operator                                # STATUS=deployed
+kubectl get pods -n aerospike-operator                         # all Running
+kubectl get crd | grep acko                                    # both CRDs present
 ```
+
+If `helm install` fails with "CustomResourceDefinition ... cannot be imported into the current release", it means you ran `make install` before. Clean up with `make uninstall` and retry.
 
 **Known gap**: at the time of writing, `test/e2e/e2e_suite_test.go:BeforeSuite` calls `make deploy`, not `helm install`. Until that is migrated, run e2e in two layers:
 
