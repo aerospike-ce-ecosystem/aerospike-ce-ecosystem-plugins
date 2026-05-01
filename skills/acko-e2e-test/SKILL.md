@@ -136,8 +136,8 @@ For each mode below, run `helm template foo . --set <args>` and verify the liste
 | UI full (api+web) | `ui.enabled=true,ui.networkPolicy.enabled=true,ui.tests.enabled=true` | api Deployment, web Deployment, both Services, NetworkPolicy with both ports (`8000` + `3100`), helm-test pod | — |
 | UI api-only | `ui.enabled=true,ui.web.enabled=false,ui.ingress.target=api,ui.networkPolicy.enabled=true,ui.tests.enabled=true` | api Deployment, api Service, NetworkPolicy with ONLY `:8000`, helm-test pod | web Deployment, web Service |
 | UI web-only | `ui.enabled=true,ui.api.enabled=false,ui.web.env.apiUrl=http://x,ui.networkPolicy.enabled=true,ui.tests.enabled=true` | web Deployment, web Service, NetworkPolicy with ONLY `:3100`, web Pod has `automountServiceAccountToken: false` | api Deployment, api Service, helm-test pod |
-| OTel disabled (default) | `ui.enabled=true` | api env contains `OTEL_SDK_DISABLED=true` | OTel exporter env vars |
-| OTel enabled | `ui.enabled=true,ui.otel.enabled=true,ui.otel.exporter.endpoint=http://col:4317` | api env contains `OTEL_EXPORTER_OTLP_ENDPOINT`, no `OTEL_SDK_DISABLED=true` | — |
+| OTel disabled (default) | `ui.enabled=true` | api env contains `OTEL_SDK_DISABLED=true` | (no `OTEL_EXPORTER_OTLP_ENDPOINT`) |
+| OTel enabled | `ui.enabled=true,ui.api.otel.enabled=true,ui.api.otel.endpoint=http://col:4317` | api env contains `OTEL_SDK_DISABLED=false` AND `OTEL_EXPORTER_OTLP_ENDPOINT=http://col:4317` AND `OTEL_TRACES_SAMPLER` | — |
 | ingress.target failfast | `ui.enabled=true,ui.web.enabled=false,ui.ingress.enabled=true` (default `target=web`) | `helm template` must FAIL with a clear error pointing at `ui.ingress.target` | — |
 
 A successful chart pass = `helm lint` clean + every row above renders / fails as documented.
