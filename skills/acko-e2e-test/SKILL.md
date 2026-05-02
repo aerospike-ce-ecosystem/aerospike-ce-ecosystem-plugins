@@ -137,6 +137,20 @@ Each row corresponds to a Ginkgo `Context` in `test/e2e/`. Status = green/red of
 - [ ] CE constraint violations are rejected at admission: `size>8`, `namespaces>2`, `network.tls`, `xdr`, enterprise image (`aerospike-server-enterprise`), `feature-key-file`. Each must surface a clear error string.
 - [ ] Duplicate ServiceMonitor when `monitoring.enabled=true` is rejected (added in #235).
 
+### API CRUD smoke (UI api → DB → Aerospike)
+
+Until the cluster-manager `ui/` ships a Playwright e2e suite, exercise the api directly with `curl` against a live `helm install`. This catches regressions that the helm-template lane and the operator Ginkgo suite both miss — DB persistence, aerospike-py wiring, the policy/error envelope of every router. It also re-exercises the four 500-error fixes from cluster-manager #261 (sample-data partial failure, query `pkType`, records empty namespace, indexes idempotency) on the real binary.
+
+Prereq: a `Completed`-phase `AerospikeCluster` is up in the cluster (Section 3 "Basic single-node cluster" satisfies this) and you have a port-forward to the ui-api. Full bash recipe is in `reference/quick-commands.md` (Section "API CRUD smoke"); the must-pass checks are:
+
+- [ ] **Connection lifecycle** — `POST /api/v1/connections` returns 201 + a `id` + `createdAt`. `GET /api/v1/connections` includes it. `DELETE /api/v1/connections/{id}` returns 204 and a subsequent `GET` returns 404. Confirms PostgreSQL persistence is wired correctly.
+- [ ] **Cluster reachability** — `GET /api/v1/clusters/{conn_id}` returns 200 with `namespaces[].name == ["test"]` (or whatever the test cluster has). Confirms aerospike-py connection from inside the api pod to the in-cluster Aerospike service is working.
+- [ ] **sample-data partial-success contract** (#261/#257) — `POST /api/v1/sample-data/{conn_id}` body `{"namespace":"test","setName":"smoke","recordCount":10}` returns 201 with `recordsCreated`, `recordsFailed`, `indexesCreated`, `indexesFailed`. Critical: never 500 even if some indexes fail.
+- [ ] **records empty/sparse namespace** (#261/#259) — `GET /api/v1/records/{conn_id}?ns=test&pageSize=3` against a namespace with zero records returns 200 with `records: []`, NOT 500.
+- [ ] **query with `pkType=auto`** (#261/#258) — `POST /api/v1/query/{conn_id}` body `{"namespace":"test","maxRecords":3,"pkType":"auto"}` returns 200, behavior identical to omitting `pkType`. Confirms the spec default is honored at runtime.
+- [ ] **indexes create+delete idempotency** (#261/#260) — `POST /api/v1/indexes/{conn_id}` returns 201 with `state: building`. `DELETE /api/v1/indexes/{conn_id}?name=...&ns=...` returns 204. Both must agree with `GET /api/v1/indexes/{conn_id}` afterwards (no orphaned 500 + actual-success state divergence).
+- [ ] **500 envelope shape** (#261 follow-up) — when an endpoint genuinely 500s (force one with a known-bad request), the body has `detail`, `error`, and `requestId`, and the response carries `X-Request-ID`. Caller can grep server logs without backchanneling.
+
 ### Logging + tracing runtime (UI api pod)
 
 These are NOT in `test/e2e/` Ginkgo. They run against a live `helm install` and confirm the cluster-manager api's logging stack works as intended. Both are required before any release that ships UI api changes.

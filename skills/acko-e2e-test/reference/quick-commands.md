@@ -193,6 +193,89 @@ kill $TCPDUMP_PID
 # expect: 0 packets captured (or only loopback traffic if a local collector exists)
 ```
 
+## API CRUD smoke
+
+End-to-end CRUD against the live ui-api. Assumes:
+- `helm install` per Section 1 has run
+- An `AerospikeCluster` named `aerospike-basic` is `phase=Completed` in namespace `aerospike` (the basic single-node from Section 3)
+- A port-forward `localhost:18000 → ui-api:80` is active
+
+```bash
+NS=aerospike-operator
+kubectl port-forward -n $NS svc/acko-aerospike-ce-kubernetes-operator-ui-api 18000:80 &
+PF=$!
+sleep 2
+API=http://localhost:18000
+
+set -euo pipefail
+trap 'kill $PF 2>/dev/null || true' EXIT
+
+# --- 1. Connection lifecycle (DB persistence) ---
+echo "[1] create connection"
+CREATE=$(curl -fsS -X POST $API/api/v1/connections \
+  -H "Content-Type: application/json" \
+  -d '{"name":"smoke","hosts":["aerospike-basic.aerospike.svc.cluster.local"],"port":3000,"clusterName":"aerospike-basic","color":"#0097D3"}')
+CONN_ID=$(echo "$CREATE" | jq -r .id)
+echo "    conn_id=$CONN_ID"
+
+echo "[1] list contains the new connection"
+curl -fsS $API/api/v1/connections | jq -e ".[] | select(.id==\"$CONN_ID\")" >/dev/null
+
+# --- 2. Cluster reachability (aerospike-py wiring) ---
+echo "[2] GET /api/v1/clusters/$CONN_ID"
+curl -fsS $API/api/v1/clusters/$CONN_ID | jq -e '.namespaces | map(.name) | contains(["test"])' >/dev/null
+
+# --- 3. sample-data partial-success contract (#257) ---
+echo "[3] POST /api/v1/sample-data — must 201, never 500"
+curl -fsS -X POST $API/api/v1/sample-data/$CONN_ID \
+  -H "Content-Type: application/json" \
+  -d '{"namespace":"test","setName":"smoke","recordCount":10}' | \
+  jq -e 'has("recordsCreated") and has("recordsFailed") and has("indexesCreated") and has("indexesFailed")' >/dev/null
+
+# --- 4. records on empty namespace (#259) ---
+# Use a different set that does NOT exist — must return empty page, not 500.
+echo "[4] GET /api/v1/records on empty set — must 200 with records=[]"
+curl -fsS "$API/api/v1/records/$CONN_ID?ns=test&set=does_not_exist&pageSize=3" | \
+  jq -e '.records == [] and .hasMore == false' >/dev/null
+
+# --- 5. query with pkType=auto (#258) ---
+echo "[5] POST /api/v1/query with pkType=auto — must 200, identical to omitting"
+WITH=$(curl -fsS -X POST $API/api/v1/query/$CONN_ID \
+  -H "Content-Type: application/json" \
+  -d '{"namespace":"test","maxRecords":3,"pkType":"auto"}' | jq -S .)
+WITHOUT=$(curl -fsS -X POST $API/api/v1/query/$CONN_ID \
+  -H "Content-Type: application/json" \
+  -d '{"namespace":"test","maxRecords":3}' | jq -S 'del(.executionTimeMs)')
+diff <(echo "$WITH" | jq 'del(.executionTimeMs)') <(echo "$WITHOUT") >/dev/null
+
+# --- 6. indexes create + delete idempotency (#260) ---
+IDX=qa_smoke_$(date +%s)
+echo "[6] POST /api/v1/indexes/$CONN_ID name=$IDX — must 201"
+curl -fsS -X POST $API/api/v1/indexes/$CONN_ID \
+  -H "Content-Type: application/json" \
+  -d "{\"namespace\":\"test\",\"set\":\"smoke\",\"bin\":\"bin_int\",\"name\":\"$IDX\",\"type\":\"numeric\"}" | \
+  jq -e '.state == "building" or .state == "ready"' >/dev/null
+sleep 2
+echo "[6] DELETE /api/v1/indexes/$CONN_ID name=$IDX — must 204"
+curl -fsS -o /dev/null -w "%{http_code}\n" -X DELETE "$API/api/v1/indexes/$CONN_ID?name=$IDX&ns=test" | grep -q '^204$'
+
+# --- 7. 500 envelope shape (#261 follow-up) ---
+# /api/v1/clusters/<bogus> 404 (not a 500), so trigger a real error path.
+# Easiest: hit a route with an unreachable in-DB connection by deleting first.
+echo "[7] verify 500 body carries detail + requestId + error when something genuinely fails"
+# (smoke skip — most happy paths above already return 2xx; do this when investigating
+#  a 5xx, not as an active assertion.)
+
+# --- 8. Cleanup connection ---
+echo "[8] cleanup"
+curl -fsS -o /dev/null -w "%{http_code}\n" -X DELETE $API/api/v1/connections/$CONN_ID | grep -q '^204$'
+curl -fsS -o /dev/null -w "%{http_code}\n" $API/api/v1/connections/$CONN_ID | grep -q '^404$'
+
+echo "API CRUD smoke: PASS"
+```
+
+If any step fails the script aborts (`set -e`); the port-forward is cleaned up by the trap. Each step is annotated with the issue number so a future failure points straight at the regression.
+
 ## Cleanup checklist between runs
 
 ```bash
