@@ -9,6 +9,7 @@ set -euo pipefail
 : "${NS_OPERATOR:=aerospike-operator}"
 : "${NS_AEROSPIKE:=aerospike}"
 : "${NS_OTEL:=otel}"
+: "${NS_CERT_MANAGER:=cert-manager}"
 : "${HELM_RELEASE:=acko}"
 : "${IMG:=ghcr.io/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator:v0.0.1}"
 : "${API_IMG:=ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api:latest}"

@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import shlex
+import shutil
 import subprocess
 import time
 from collections.abc import Mapping, Sequence
@@ -92,7 +93,7 @@ def run_text(cmd: Sequence[str], **kwargs) -> str:
 
 def have(tool: str) -> bool:
     """True if the tool is on PATH."""
-    return run(["which", tool], check=False, quiet=True).returncode == 0
+    return shutil.which(tool) is not None
 
 
 def tool_version(tool: str, args: Sequence[str] = ("--version",)) -> str:

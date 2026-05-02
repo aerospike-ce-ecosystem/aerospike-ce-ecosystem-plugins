@@ -8,7 +8,6 @@ responses, automatic JSON, and rich pytest failure introspection — vs
 from __future__ import annotations
 
 import logging
-from contextlib import contextmanager
 from typing import Any
 
 import httpx
@@ -27,6 +26,7 @@ class ApiClient:
     def __init__(self, base_url: str, *, timeout: float = 10.0):
         self._client = httpx.Client(base_url=base_url, timeout=timeout)
         self.base_url = base_url
+        self._openapi_cache: dict | None = None
 
     def __enter__(self) -> ApiClient:
         return self
@@ -51,25 +51,21 @@ class ApiClient:
 
     # -----------------------------------------------------------------
     # /api/openapi.json convenience — used to validate that the spec
-    # matches what we're testing, and to discover routes.
+    # matches what we're testing, and to discover routes. Cached because
+    # the spec is static for the lifetime of the api process and tests
+    # often probe several paths in a row.
     # -----------------------------------------------------------------
     def openapi(self) -> dict:
-        r = self.get("/api/openapi.json")
-        r.raise_for_status()
-        return r.json()
+        cached = self._openapi_cache
+        if cached is None:
+            r = self.get("/api/openapi.json")
+            r.raise_for_status()
+            cached = r.json()
+            self._openapi_cache = cached
+        return cached
 
     def has_path(self, path: str) -> bool:
         return path in self.openapi().get("paths", {})
 
     def k8s_management_enabled(self) -> bool:
         return any(p.startswith("/api/v1/k8s/") for p in self.openapi().get("paths", {}))
-
-
-@contextmanager
-def api_client(base_url: str, *, timeout: float = 10.0):
-    """Context manager that closes the client on exit even when tests raise."""
-    client = ApiClient(base_url, timeout=timeout)
-    try:
-        yield client
-    finally:
-        client.close()

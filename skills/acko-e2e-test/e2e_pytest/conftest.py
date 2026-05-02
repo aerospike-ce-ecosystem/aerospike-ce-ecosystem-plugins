@@ -54,14 +54,15 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     """Two adjustments to the default collection order:
 
     1. `heavy` is opt-in only — skip unless explicitly selected with `-m heavy`.
-    2. `test_helm_real_install.py` MUST run before any test that uses the
+    2. All chart-only tests (`test_helm_lint`, `test_helm_matrix`, and
+       `test_helm_real_install`) MUST run before any test that uses the
        `helm_release` session fixture. Otherwise the chart's CRD subchart is
        claimed by the long-lived `acko` release first, and the separate
        `acko-test` release tries to take ownership of the same CRDs and is
        refused with "annotation validation error: meta.helm.sh/release-name".
     """
-    # 1. Heavy auto-skip
-    selected = config.getoption("-m") or ""
+    # 1. Heavy auto-skip — pytest registers `-m` under dest=`markexpr`
+    selected = config.getoption("markexpr", default="") or ""
     if "heavy" not in selected:
         skip_heavy = pytest.mark.skip(reason="`heavy` lane is opt-in (use -m heavy)")
         for item in items:
@@ -167,34 +168,18 @@ def live_cluster(helm_release: dict) -> Iterator[dict]:
     name = "aerospike-basic"
     ns = env.NS_AEROSPIKE
 
-    # Ensure namespace
-    run(["kubectl", "create", "namespace", ns, "--dry-run=client", "-o", "yaml"], check=True, quiet=True)
-    proc = subprocess.run(
+    # Ensure namespace (apply-with-dry-run pattern so re-runs don't error on "already exists")
+    ns_yaml = run(
         ["kubectl", "create", "namespace", ns, "--dry-run=client", "-o", "yaml"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    subprocess.run(
-        ["kubectl", "apply", "-f", "-"],
-        input=proc.stdout,
-        text=True,
-        capture_output=True,
-        check=True,
-    )
+        quiet=True,
+    ).stdout
+    run(["kubectl", "apply", "-f", "-"], stdin=ns_yaml, quiet=True)
 
     # Re-target sample to our namespace, in case the sample pins a different one.
     doc = _yaml.safe_load(sample.read_text())
     doc["metadata"]["name"] = name
     doc["metadata"]["namespace"] = ns
-    text = _yaml.safe_dump(doc, sort_keys=False)
-    subprocess.run(
-        ["kubectl", "apply", "-f", "-"],
-        input=text,
-        text=True,
-        capture_output=True,
-        check=True,
-    )
+    run(["kubectl", "apply", "-f", "-"], stdin=_yaml.safe_dump(doc, sort_keys=False), quiet=True)
 
     wait_asc_completed(name, ns, timeout=300)
     yield {"name": name, "namespace": ns}

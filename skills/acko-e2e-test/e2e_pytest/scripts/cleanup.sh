@@ -22,7 +22,7 @@ if helm status "$HELM_RELEASE" -n "$NS_OPERATOR" >/dev/null 2>&1; then
 fi
 
 namespaces_to_delete=("$NS_AEROSPIKE" "$NS_OTEL" "$NS_OPERATOR")
-[ "$keep_cm" -eq 0 ] && namespaces_to_delete+=("cert-manager")
+[ "$keep_cm" -eq 0 ] && namespaces_to_delete+=("$NS_CERT_MANAGER")
 for ns in "${namespaces_to_delete[@]}"; do
     if kubectl get ns "$ns" >/dev/null 2>&1; then
         log "delete ns/$ns"

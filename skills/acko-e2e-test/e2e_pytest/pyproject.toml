@@ -5,8 +5,6 @@ description = "ACKO end-to-end test suite — eval contracts as pytest tests"
 requires-python = ">=3.12"
 dependencies = [
     "pytest>=8.3",
-    "pytest-asyncio>=0.24",
-    "pytest-html>=4.1",
     "httpx>=0.28",
     "pyyaml>=6.0",
     "tenacity>=9.0",
@@ -19,7 +17,6 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     # Lane markers — pick at most one per test
