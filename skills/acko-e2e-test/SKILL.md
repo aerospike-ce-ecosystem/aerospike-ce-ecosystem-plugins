@@ -15,13 +15,26 @@ The skill is opinionated about three things:
 
 ---
 
+## Bootstrap (fresh box — Ubuntu / macOS / Codespaces / Claude Code env)
+
+The skill needs: `uv`, `kind`, `podman`, `kubectl`, `helm`, `go`, `jq` plus a local clone of `aerospike-ce-kubernetes-operator`. There's a one-shot installer that detects what's missing and installs only that:
+
+```bash
+cd skills/acko-e2e-test/e2e_pytest
+bash scripts/bootstrap.sh           # install everything missing (uses apt or brew)
+bash scripts/bootstrap.sh --check   # status only — install nothing
+bash scripts/bootstrap.sh --no-operator   # don't auto-clone the operator repo
+```
+
+The operator repo is discovered automatically — `helpers/env.py` tries (in order): `$OPERATOR_REPO`, the workspace-sibling layout (`asc-workspace/aerospike-ce-kubernetes-operator`), `$CWD/aerospike-ce-kubernetes-operator`, `~/aerospike-ce-kubernetes-operator`, `~/github/aerospike-ce-kubernetes-operator`, `/workspace/aerospike-ce-kubernetes-operator`. If none exist, fixtures `pytest.skip()` with a clear message — no hard import-time failure.
+
 ## How to run
 
 ```bash
-cd e2e_pytest
+cd skills/acko-e2e-test/e2e_pytest
 uv sync                          # one-time: pull pytest + httpx + pyyaml + tenacity
 
-# Fast PR gate — chart-template only, no Kind cluster (~5s)
+# Fast gate — chart-template only, no Kind cluster (~5s)
 uv run pytest -m chart
 
 # Smoke — chart + cluster + api + observability (~10 min)
@@ -34,7 +47,7 @@ uv run pytest -m "smoke or full"
 uv run pytest -m heavy
 ```
 
-`KEEP_CLUSTER=1 uv run pytest -m smoke` keeps the Kind cluster after teardown for iterative debugging. Override env defaults in `helpers/env.py` (KIND_CLUSTER, IMG, NS_*, paths) when running outside the workspace layout.
+`KEEP_CLUSTER=1 uv run pytest -m smoke` keeps the Kind cluster after teardown for iterative debugging. Override env defaults in `helpers/env.py` (KIND_CLUSTER, IMG, NS_*, paths) or via env vars (e.g. `OPERATOR_REPO=/path/to/repo`) when running outside the assumed layout.
 
 ---
 

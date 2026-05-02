@@ -37,12 +37,42 @@ API_IMG = _env("API_IMG", "ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-mana
 COLLECTOR_IMAGE = _env("COLLECTOR_IMAGE", "docker.io/otel/opentelemetry-collector-contrib:latest")
 CERT_MANAGER_VERSION = _env("CERT_MANAGER_VERSION", "v1.19.3")
 
-# Paths — operator repo and chart. Default assumes the workspace layout
-# (asc-workspace/aerospike-ce-kubernetes-operator alongside the plugins repo).
-# helpers/env.py → parents: helpers, e2e_pytest, acko-e2e-test, skills,
-# aerospike-ce-ecosystem-plugins, asc-workspace (parent #5).
-_DEFAULT_OPERATOR_REPO = Path(__file__).resolve().parents[5] / "aerospike-ce-kubernetes-operator"
-OPERATOR_REPO = Path(_env("OPERATOR_REPO", str(_DEFAULT_OPERATOR_REPO)))
+# Paths — operator repo and chart.
+# Discovery order (first existing dir wins):
+#   1. $OPERATOR_REPO env var
+#   2. asc-workspace sibling layout (this plugin under asc-workspace/aerospike-ce-ecosystem-plugins)
+#   3. CWD/aerospike-ce-kubernetes-operator (run from a parent dir that holds both)
+#   4. ~/aerospike-ce-kubernetes-operator (cloned to home)
+#   5. ~/github/aerospike-ce-kubernetes-operator (the default ~/github/<repo> layout)
+#   6. /workspace/aerospike-ce-kubernetes-operator (devcontainer / GitHub Codespaces style)
+# If none found, OPERATOR_REPO points at candidate #2 anyway and tests that
+# require it will pytest.skip() with a helpful message — no hard failure
+# from import time.
+def _discover_operator_repo() -> Path:
+    explicit = os.environ.get("OPERATOR_REPO")
+    if explicit:
+        return Path(explicit).expanduser()
+
+    here = Path(__file__).resolve()
+    # parents: helpers, e2e_pytest, acko-e2e-test, skills, aerospike-ce-ecosystem-plugins, asc-workspace
+    workspace_sibling = here.parents[5] / "aerospike-ce-kubernetes-operator"
+
+    candidates = [
+        workspace_sibling,
+        Path.cwd() / "aerospike-ce-kubernetes-operator",
+        Path.home() / "aerospike-ce-kubernetes-operator",
+        Path.home() / "github" / "aerospike-ce-kubernetes-operator",
+        Path("/workspace/aerospike-ce-kubernetes-operator"),
+    ]
+    for c in candidates:
+        if c.is_dir():
+            return c
+    # Nothing found — return the workspace-sibling guess so error messages
+    # at fixture-skip time point at the conventional location.
+    return workspace_sibling
+
+
+OPERATOR_REPO = _discover_operator_repo()
 CHART_PATH = Path(_env("CHART_PATH", str(OPERATOR_REPO / "charts" / "aerospike-ce-kubernetes-operator")))
 
 
