@@ -25,7 +25,10 @@ img_repo="${IMG%:*}"
 img_tag="${IMG##*:}"
 api_repo="${API_IMG%:*}"
 api_tag="${API_IMG##*:}"
+# Operator image is built locally and loaded into Kind → pullPolicy=Never.
+# UI-api image is the upstream ghcr.io build → must be pullable, not Never.
 pull_policy="Never"
+api_pull_policy="IfNotPresent"
 log_format="text"
 otel="off"
 otel_endpoint="http://otel-collector.${NS_OTEL}.svc.cluster.local:4317"
@@ -34,18 +37,19 @@ extras=()
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --release)         release="$2"; shift 2 ;;
-        --namespace)       namespace="$2"; shift 2 ;;
-        --image-repo)      img_repo="$2"; shift 2 ;;
-        --image-tag)       img_tag="$2"; shift 2 ;;
-        --pull-policy)     pull_policy="$2"; shift 2 ;;
-        --api-image-repo)  api_repo="$2"; shift 2 ;;
-        --api-image-tag)   api_tag="$2"; shift 2 ;;
-        --log-format)      log_format="$2"; shift 2 ;;
-        --otel)            otel="$2"; shift 2 ;;
-        --otel-endpoint)   otel_endpoint="$2"; shift 2 ;;
-        --upgrade)         mode="upgrade"; shift ;;
-        --set)             extras+=("--set" "$2"); shift 2 ;;
+        --release)          release="$2"; shift 2 ;;
+        --namespace)        namespace="$2"; shift 2 ;;
+        --image-repo)       img_repo="$2"; shift 2 ;;
+        --image-tag)        img_tag="$2"; shift 2 ;;
+        --pull-policy)      pull_policy="$2"; shift 2 ;;
+        --api-image-repo)   api_repo="$2"; shift 2 ;;
+        --api-image-tag)    api_tag="$2"; shift 2 ;;
+        --api-pull-policy)  api_pull_policy="$2"; shift 2 ;;
+        --log-format)       log_format="$2"; shift 2 ;;
+        --otel)             otel="$2"; shift 2 ;;
+        --otel-endpoint)    otel_endpoint="$2"; shift 2 ;;
+        --upgrade)          mode="upgrade"; shift ;;
+        --set)              extras+=("--set" "$2"); shift 2 ;;
         *) die "unknown flag: $1" ;;
     esac
 done
@@ -58,7 +62,7 @@ set_args=(
     --set "image.pullPolicy=$pull_policy"
     --set "ui.api.image.repository=$api_repo"
     --set "ui.api.image.tag=$api_tag"
-    --set "ui.api.image.pullPolicy=$pull_policy"
+    --set "ui.api.image.pullPolicy=$api_pull_policy"
     --set "ui.env.logFormat=$log_format"
 )
 

@@ -38,6 +38,17 @@ for ns in "${namespaces_to_delete[@]}"; do
     done
 done
 
+# The chart explicitly keeps these CRDs across `helm uninstall` (resource
+# policy=keep). For a re-runnable test environment we want them gone too —
+# otherwise a fresh `helm install` would inherit ownership annotations from
+# the prior release and refuse to take over (see helm_real_install conflict).
+for crd in aerospikeclusters.acko.io aerospikeclustertemplates.acko.io; do
+    if kubectl get crd "$crd" >/dev/null 2>&1; then
+        kubectl delete crd "$crd" --ignore-not-found --wait=false >&2 || true
+        log "delete crd/$crd"
+    fi
+done
+
 if [ "$del_kind" -eq 1 ]; then
     log "deleting Kind cluster '$KIND_CLUSTER'"
     kind delete cluster --name "$KIND_CLUSTER" >&2 || true

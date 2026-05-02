@@ -51,15 +51,33 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """`heavy` is opt-in only — skip it unless explicitly selected."""
-    # If the user passed `-m heavy` or `-m "... heavy ..."`, leave alone.
+    """Two adjustments to the default collection order:
+
+    1. `heavy` is opt-in only — skip unless explicitly selected with `-m heavy`.
+    2. `test_helm_real_install.py` MUST run before any test that uses the
+       `helm_release` session fixture. Otherwise the chart's CRD subchart is
+       claimed by the long-lived `acko` release first, and the separate
+       `acko-test` release tries to take ownership of the same CRDs and is
+       refused with "annotation validation error: meta.helm.sh/release-name".
+    """
+    # 1. Heavy auto-skip
     selected = config.getoption("-m") or ""
-    if "heavy" in selected:
-        return
-    skip_heavy = pytest.mark.skip(reason="`heavy` lane is opt-in (use -m heavy)")
+    if "heavy" not in selected:
+        skip_heavy = pytest.mark.skip(reason="`heavy` lane is opt-in (use -m heavy)")
+        for item in items:
+            if "heavy" in item.keywords:
+                item.add_marker(skip_heavy)
+
+    # 2. Move helm_real_install (and chart-only tests) to the front so they
+    #    run before the `helm_release` session fixture is created.
+    pre, post = [], []
     for item in items:
-        if "heavy" in item.keywords:
-            item.add_marker(skip_heavy)
+        path = str(item.fspath)
+        if "test_helm_real_install" in path or "test_helm_lint" in path or "test_helm_matrix" in path:
+            pre.append(item)
+        else:
+            post.append(item)
+    items[:] = pre + post
 
 
 # ---------------------------------------------------------------------------

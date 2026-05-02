@@ -29,12 +29,19 @@ KIND_EXPERIMENTAL_PROVIDER="$KIND_PROVIDER" \
     kind load image-archive "$tar" --name "$KIND_CLUSTER" >&2
 rm -f "$tar"
 
-log "Verifying image present on every node"
+log "Verifying image present on every node (retry up to 30s — kind load can lag a few s on slower nodes)"
 img_base=$(echo "$IMG" | cut -d: -f1 | sed 's|.*/||')
 for n in $(kubectl get nodes -o name | sed 's|node/||'); do
+    deadline=$(( $(date +%s) + 30 ))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+        if "$CONTAINER_TOOL" exec "$n" crictl images 2>/dev/null | grep -q "$img_base"; then
+            break
+        fi
+        sleep 2
+    done
     "$CONTAINER_TOOL" exec "$n" crictl images 2>/dev/null \
         | grep -q "$img_base" \
-        || die "image $IMG missing on node $n"
+        || die "image $IMG missing on node $n after 30s"
 done
 
 log "Kind cluster + image ready"

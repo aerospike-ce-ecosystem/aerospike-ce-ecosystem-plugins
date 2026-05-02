@@ -56,6 +56,12 @@ def test_helm_install_and_test(chart_path: Path, kind_cluster: str, cert_manager
     finally:
         run(["helm", "uninstall", release, "-n", ns, "--wait", "--timeout", "2m"], check=False)
         run(["kubectl", "delete", "ns", ns, "--ignore-not-found", "--wait=false"], check=False)
+        # The chart bundles CRDs as a subchart. helm 3 deletes those on
+        # uninstall in MOST cases, but ownership annotations sometimes linger,
+        # which breaks the next `helm install` (the long-lived `acko` release
+        # used by other fixtures). Force-delete to guarantee a clean slate.
+        for crd in ("aerospikeclusters.acko.io", "aerospikeclustertemplates.acko.io"):
+            run(["kubectl", "delete", "crd", crd, "--ignore-not-found"], check=False)
         # Best-effort wait so subsequent tests don't trip on a Terminating ns.
         wait_for(
             lambda: run(["kubectl", "get", "ns", ns], check=False, quiet=True).returncode != 0,

@@ -97,10 +97,15 @@ def test_create_cluster_via_api(
         wait_asc_completed(name, ns, timeout=300)
 
         # ---- 3. GET single cluster ----
+        # The api returns a custom processed view (summary fields like
+        # connectionId/aerospikeClusterSize/age/conditions), NOT the raw
+        # AerospikeCluster CR. So we don't assert on .metadata.name —
+        # the URL itself encodes name+ns and a 200 with a non-empty body
+        # confirms the api found the right CR.
         r = api.get(f"/api/v1/k8s/clusters/{ns}/{name}")
-        assert r.status_code == 200
+        assert r.status_code == 200, f"GET single returned {r.status_code}: {r.text}"
         body = r.json()
-        assert body.get("metadata", {}).get("name") == name
+        assert isinstance(body, dict) and body, f"GET single body was empty: {body!r}"
 
         # ---- 4. GET .../health ----
         r = api.get(f"/api/v1/k8s/clusters/{ns}/{name}/health")

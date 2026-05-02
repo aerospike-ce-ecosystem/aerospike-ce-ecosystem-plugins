@@ -37,6 +37,7 @@ API_IMG = _env("API_IMG", "ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-mana
 COLLECTOR_IMAGE = _env("COLLECTOR_IMAGE", "docker.io/otel/opentelemetry-collector-contrib:latest")
 CERT_MANAGER_VERSION = _env("CERT_MANAGER_VERSION", "v1.19.3")
 
+
 # Paths — operator repo and chart.
 # Discovery order (first existing dir wins):
 #   1. $OPERATOR_REPO env var

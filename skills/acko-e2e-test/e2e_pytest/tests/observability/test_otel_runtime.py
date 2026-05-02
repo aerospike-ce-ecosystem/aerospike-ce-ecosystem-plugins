@@ -20,6 +20,7 @@ from helpers import env
 from helpers.api_client import ApiClient
 from helpers.cli import run, run_text
 from helpers.otel_log import find_correlated_traces, parse_collector_log
+from helpers.port_forward import port_forward
 
 logger = logging.getLogger(__name__)
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
@@ -129,8 +130,11 @@ def otel_collector(kind_cluster: str) -> str:
 def test_otel_runtime_emits_correlated_traces(
     helm_release: dict,
     otel_collector: str,
-    api: ApiClient,
 ) -> None:
+    # NOTE: we DON'T take the `api` fixture here — that fixture opens the
+    # port-forward eagerly (function-scope setup). The helm upgrade below
+    # rolls out a new ui-api pod, breaking the existing PF. So we open the
+    # PF inline AFTER the upgrade, after `kubectl rollout status` completes.
     # ---- 1. Upgrade chart to enable OTel pointed at the collector ----
     run(
         [
@@ -175,11 +179,33 @@ def test_otel_runtime_emits_correlated_traces(
     assert envs.get("OTEL_SERVICE_NAME") == "aerospike-cluster-manager-api"
     assert envs.get("OTEL_TRACES_SAMPLER"), "OTEL_TRACES_SAMPLER not set"
 
-    # ---- 3. Generate traffic ----
-    for _ in range(5):
-        api.get("/api/health")
-        api.get("/api/v1/connections")
-        api.get("/api/openapi.json")
+    # ---- 3. Generate traffic (open PF AFTER the rollout finished) ----
+    ui_svc = run_text(
+        [
+            "kubectl",
+            "get",
+            "svc",
+            "-n",
+            helm_release["namespace"],
+            "-l",
+            "app.kubernetes.io/component=ui-api",
+            "-o",
+            "jsonpath={.items[0].metadata.name}",
+        ]
+    )
+    with (
+        port_forward(
+            namespace=helm_release["namespace"],
+            service=ui_svc,
+            local_port=18000,
+            service_port=80,
+        ) as base_url,
+        ApiClient(base_url) as api,
+    ):
+        for _ in range(5):
+            api.get("/api/health")
+            api.get("/api/v1/connections")
+            api.get("/api/openapi.json")
     # Let the BatchSpanProcessor flush
     time.sleep(8)
 
