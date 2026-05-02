@@ -1,332 +1,247 @@
 ---
 name: acko-e2e-test
-description: "MUST USE for ACKO end-to-end testing on Kind/local clusters. Contains the canonical scenario list (deploy, scale, rolling update, multi-rack, ACL, PVC, Helm chart split-mode, OTel observability), Ginkgo label conventions (`heavy` vs default), the project's mandatory `helm install`-based operator setup (NOT `make run-local`/`make deploy` — those bypass the real user install path), and performance-check procedures the project expects every release to verify. Without this skill, e2e runs miss scenarios that have caught regressions historically (CE 8.1 data-size rename, webhook duplicate ServiceMonitor, helm test pod in web-only mode, circuit-breaker BackoffActive) and they may install the operator via paths real users never take. Triggers on: ACKO e2e test, kind cluster test, make test-e2e, release verification, performance test for Aerospike operator, helm chart test, post-merge smoke test, regression checklist."
+description: "MUST USE for ACKO end-to-end testing on Kind/local clusters. Contains the canonical scenario list (deploy, scale, rolling update, multi-rack, ACL, PVC, Helm chart split-mode, OTel observability, UI api CRUD), Ginkgo label conventions (`heavy` vs default), the project's mandatory `helm install`-based operator setup (NOT `make run-local`/`make deploy` — those bypass the real user install path), and performance-check procedures the project expects every release to verify. Each contract maps to a pytest test under `e2e_pytest/tests/` (Python for assertions/parsing/httpx, bash scripts under `e2e_pytest/scripts/` for CLI orchestration). Without this skill, e2e runs miss scenarios that have caught regressions historically (CE 8.1 data-size rename, webhook duplicate ServiceMonitor, helm test pod in web-only mode, circuit-breaker BackoffActive, missing FastAPIInstrumentor in OTel pipeline #265) and they may install the operator via paths real users never take. Triggers on: ACKO e2e test, kind cluster test, make test-e2e, release verification, performance test for Aerospike operator, helm chart test, post-merge smoke test, regression checklist."
 ---
 
 # ACKO End-to-End Test Playbook
 
-Canonical scenarios + performance checks the ACKO project expects to pass before each release. Run from the operator repo root (`aerospike-ce-kubernetes-operator/`). Most scenarios run inside a Kind cluster spawned by `make setup-test-e2e`.
+This skill encodes **what counts as PASS** for each ACKO release-verification concern in natural language, plus a `e2e_pytest/` project that **performs and asserts** each contract.
+
+The skill is opinionated about three things:
+
+1. **Real users install via Helm.** e2e MUST exercise `helm install ./charts/...`. `make run-local` and `make deploy` are forbidden — they bypass the chart and miss regressions in RBAC, CRD bundling, value defaults, helper templates.
+2. **Eval criteria live here, mechanics live in tests.** This file does NOT contain bash blobs or kubectl commands. If you find yourself typing `kubectl ...` while reading this, stop — the test in `e2e_pytest/tests/` is the source of truth.
+3. **Two-language hybrid.** Python (pytest + httpx + pyyaml) for assertion-heavy work where introspection and dict access pull their weight. Bash (`scripts/`) for the CLI orchestration chain (kind up, helm install, cleanup) where wrapping `kubectl` in Python is just pure overhead.
 
 ---
 
-## 0. Prerequisites
+## How to run
 
 ```bash
-# Required tools
-command -v kind go podman kubectl helm    # all must resolve
-go version                                # >= 1.25
-kind --version                            # >= 0.31
-podman machine list                       # machine must be Running
+cd e2e_pytest
+uv sync                          # one-time: pull pytest + httpx + pyyaml + tenacity
+
+# Fast PR gate — chart-template only, no Kind cluster (~5s)
+uv run pytest -m chart
+
+# Smoke — chart + cluster + api + observability (~10 min)
+uv run pytest -m smoke
+
+# Full — smoke + the in-tree Ginkgo go test (~30+ min)
+uv run pytest -m "smoke or full"
+
+# Heavy — opt-in lane, never auto-selected
+uv run pytest -m heavy
 ```
 
-CLAUDE.md (repo root) note — Podman is the project's container runtime. Set `CONTAINER_TOOL=podman KIND_PROVIDER=podman` for every e2e invocation. Do NOT swap to Docker without a recorded ADR.
+`KEEP_CLUSTER=1 uv run pytest -m smoke` keeps the Kind cluster after teardown for iterative debugging. Override env defaults in `helpers/env.py` (KIND_CLUSTER, IMG, NS_*, paths) when running outside the workspace layout.
 
 ---
 
-## 1. Operator Install — use `helm install`, NOT `make run-local` / `make deploy`
+## Run modes (pytest markers)
 
-**This is the project's most important e2e rule.** Real users install the operator via the Helm chart at `charts/aerospike-ce-kubernetes-operator/`. e2e runs MUST exercise that same path so chart-level regressions (RBAC scope, CRD bundling, value defaults, namespace handling, helper templates) get caught before release.
+| Marker | When to use | Time | Cluster needed |
+|--------|-------------|------|-----------------|
+| `chart` | Chart-only PR | ~5s | no |
+| `smoke` | Most PRs (functional + api + observability) | ~10 min | yes |
+| `full` | Pre-release / post-rebase / weekly main | ~30+ min | yes |
+| `heavy` | Soak / large-cluster lane | varies | yes |
+| `regression_guard` | Bug-specific re-asserts (#257, #258, #259, #260, #265, #235, #236) | (composes with above) | varies |
 
-Forbidden during e2e (these bypass the chart entirely):
-- `make run-local` — runs the controller as a host process against the cluster's API. Skips RBAC, the chart, and image loading.
-- `make deploy` — applies in-tree `config/` manifests directly with kustomize. Skips the chart, helper templates, and `values.yaml` defaults.
+The `heavy` lane is opt-in — `conftest.py` skips heavy tests unless the user explicitly passes `-m heavy`. This matches Ginkgo's heavy-label semantics and prevents an inadvertent 30-min run from a no-arg `pytest`.
 
-Required setup (run after `make setup-test-e2e` brings up the Kind cluster):
+`heavy` Ginkgo label scope: `e2e_multirack_test.go`, `e2e_pvc_test.go`, and `e2e_template_test.go` are heavy at suite level; `e2e_cluster_test.go` and `e2e_features_test.go` mark specific Contexts heavy. Confirm against the test file before reasoning about scope.
+
+---
+
+## Eval criteria (what counts as PASS)
+
+Every section below is owned by one or more pytest tests. The pytest test file is the contract — read it before changing it.
+
+### Functional — operator + cluster lifecycle
+
+The operator reconciles AerospikeCluster CRs through every supported lifecycle event without losing data, leaking PVCs, or leaving the CR in a non-terminal phase.
+
+PASS when:
+
+- **`tests/lifecycle/test_asc_create_smoke.py`** — applying `config/samples/acko_v1alpha1_aerospikecluster.yaml` results in `phase=Completed` within 5 min, the expected K8s resources exist (StatefulSet, headless Service, ConfigMap, PDB), `status.size == spec.size`, and `status.pods` reports the right number of running+ready entries. Deleting the CR removes the namespace's ASC count to 0; re-applying it returns to Completed.
+- **`tests/lifecycle/test_ginkgo.py`** — the in-tree Ginkgo suite (`go test ./test/e2e/`) passes 100% with no `FAIL!` lines. Covers single-node + 3-node PVC + multi-rack 6-node + ACL/cascadeDelete + PVC create/retain/cleanup + multi-rack scale + custom metrics + perPodStatus configHash + rolling restart + scale up/down + RollingUpdateBatchSize + paused cluster + PDB enable/disable + template + drift detection. Mode selectable via `GINKGO_MODE` env var.
+
+### Functional — webhook validation (CE constraints)
+
+Every CE constraint is enforced at admission so users cannot accidentally configure an enterprise feature.
+
+PASS when (currently asserted via the in-tree Ginkgo suite, scheduled for split into `tests/lifecycle/test_webhook.py`):
+
+- `size > 8` is rejected
+- `namespaces > 2` is rejected
+- `network.tls`, `xdr`, enterprise images (`aerospike-server-enterprise`), `feature-key-file` are rejected
+- A duplicate `ServiceMonitor` when `monitoring.enabled=true` is rejected (#235)
+
+### Helm chart — manifest matrix
+
+The chart renders correctly across every supported toggle combination and fails fast on incompatible ones.
+
+PASS when **`tests/chart/test_helm_matrix.py`** verifies the matrix:
+
+| Mode | Contract |
+|------|----------|
+| **operator-only** (`--set ui.enabled=false`) | Operator Deployment present; NO ui-api/ui-web; NO ServiceMonitor |
+| **UI full** (api + web) | api + web Deployments; NetworkPolicy with both `:8000` and `:3100`; helm-test pod present |
+| **UI api-only** | api only; NetworkPolicy with ONLY `:8000`; helm-test pod present |
+| **UI web-only** | web only; NetworkPolicy with ONLY `:3100`; web pod has `automountServiceAccountToken=false`; NO helm-test pod |
+| **OTel disabled (default)** | `OTEL_SDK_DISABLED=true` in api env; no OTLP endpoint |
+| **OTel enabled** | `OTEL_SDK_DISABLED=false`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_TRACES_SAMPLER`, `OTEL_SERVICE_NAME` all set |
+| **`ingress.target` failfast** | `helm template` MUST fail with an error mentioning `ui.ingress.target` |
+
+Plus **`tests/chart/test_helm_lint.py`** — `helm lint` reports no `[ERROR]` entries.
+
+> ⚠️ **Drift note**: The chart's current default is `ui.enabled=true`. The "operator-only" row uses `--set ui.enabled=false` explicitly. If the default flips, update the parametrize entry.
+
+### Helm chart — real install + helm test
+
+`helm template` catches static regressions but misses things that only surface during apply (CRD ordering, hook race, RBAC propagation, hanging helm-test pods like #236).
+
+PASS when **`tests/chart/test_helm_real_install.py`**:
+
+- `helm install` on a fresh namespace succeeds and pods reach Running
+- `helm test <release>` reports `Phase: Succeeded`
+- `helm uninstall` + namespace deletion leaves no leftover state
+
+### UI api — CRUD smokes
+
+The cluster-manager api is the user-facing surface for record browsing, query, sample data, and indexes. Several router-level regressions historically returned 500 instead of well-formed responses (#257–#260) — these are re-asserted on every run as `regression_guard` tests.
+
+PASS when **`tests/api/test_api_crud.py`** verifies all of:
+
+- **A. Connection lifecycle** — `POST /api/v1/connections` returns 201 + `id` + `createdAt`; `GET` list contains it; `DELETE` returns 204; subsequent `GET` returns 404.
+- **B. Cluster reachability** — `GET /api/v1/clusters/{conn_id}` returns 200 with `namespaces[].name` including `test`. Confirms aerospike-py wiring inside the api pod.
+- **C. sample-data partial-success** (#257) — `POST /api/v1/sample-data/{conn_id}` returns 201 with `recordsCreated`, `recordsFailed`, `indexesCreated`, `indexesFailed` keys. **Critical**: NEVER 500 even when some indexes fail.
+- **D. records empty/sparse namespace** (#259) — `GET /api/v1/records/{conn_id}?ns=test&set=does-not-exist` returns 200 with `records:[]` (NOT 500).
+- **E. query `pkType=auto`** (#258) — `POST /api/v1/query/{conn_id}` with `{"pkType":"auto"}` returns 200, identical behavior to omitting `pkType`.
+- **F. indexes idempotency** (#260) — `POST` returns 201 with `state: building|ready`; `DELETE` returns 204; calling `DELETE` again on the same name still returns 204 (no orphaned 500).
+- **G. X-Request-ID round-trip** — every response carries `x-request-id` echoing whatever the caller sent.
+
+### UI api — K8s management create/delete
+
+Real UI users create AerospikeCluster CRs through the api, not directly with `kubectl`. The whole `/api/v1/k8s/clusters/...` family was previously untested in e2e.
+
+PASS when **`tests/api/test_api_k8s_create.py`**:
+
+- `POST /api/v1/k8s/clusters` creates a 1-node CR via the api → 200/201/202
+- The CR appears in `kubectl get asc` and reaches `phase=Completed`
+- `GET .../{ns}/{name}` returns 200 with the right `metadata.name`
+- `GET .../health` returns 200
+- `GET .../yaml` returns parseable YAML
+- `DELETE .../{ns}/{name}` removes the CR; subsequent `GET` returns 404
+
+### Logging — text vs JSON, request correlation
+
+PASS when **`tests/observability/test_logging.py`**:
+
+- Default `LOG_FORMAT=text` produces `YYYY-... INFO [logger] message` lines
+- `helm upgrade --set ui.env.logFormat=json` switches every record to a JSON object with `timestamp`, `level`, `logger`, `message`, `request_id` keys
+- A `curl -H "X-Request-ID: <id>"` request echoes the id in `x-request-id` response header AND embeds it as `request_id` in the matching JSON log record. Caller can correlate without server access.
+- Note: the middleware-emitted access log line shows `trace_id: null, span_id: null` even when OTel is fully enabled — this is by design (the middleware writes after the OTel span closes). Logs emitted from inside route handlers carry the real trace IDs.
+
+### OTel — opt-in env wiring + runtime export
+
+PASS when **`tests/observability/test_otel_runtime.py`** (regression_guard for cluster-manager #265):
+
+- `helm upgrade --set ui.api.otel.enabled=true,...endpoint=...` flips `OTEL_SDK_DISABLED=false` and sets `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_PROTOCOL`, `OTEL_TRACES_SAMPLER`, `OTEL_SERVICE_NAME=aerospike-cluster-manager-api`.
+- A deployed OpenTelemetry collector (`reference/otel-collector.yaml`) receives traces with `service.name: aerospike-cluster-manager-api`.
+- **Both** `opentelemetry.instrumentation.fastapi` and `opentelemetry.instrumentation.asyncpg` instrumentation scopes appear at the collector. Before #265 only asyncpg spans showed up, parent-less.
+- At least one trace contains a Server-kind FastAPI span (HTTP request) **and** an asyncpg child span sharing the same trace ID — proving HTTP→DB context propagation.
+
+### Performance / soak (release-tag only)
+
+These are **not** gated on every PR but are required before tagging a minor release. Currently captured as TODOs; record results in `project-hub/docs/docs/history/releases/<version>/perf.md`.
+
+PASS targets:
+
+- **Reconcile loop** — 6-node multi-rack, 10× no-op `kubectl edit` → p99 reconcile < 2 s, circuit breaker stays Closed.
+- **Rolling restart** — 8-node + `RollingUpdateBatchSize=2` → restart in `(size/batchSize) × (warm_restart + 30s)`, no `BackoffActive`.
+- **Scale-up burst** — 1 → 8 nodes in one patch → all Ready < 5 min on Kind, no PVC stuck.
+- **Webhook latency** — `kubectl apply` 100 invalid CRs in a tight loop → 100% rejected, no API server timeout, operator stays Ready.
+- **Memory ceiling** — 1h soak under 6-node multi-rack → operator RSS < 256 MiB, no OOM, no fd leak.
+- **OTel egress when disabled** — default install + `tcpdump :4317,4318` for 10 min → 0 packets.
+
+---
+
+## Project layout
+
+```
+e2e_pytest/
+├── pyproject.toml         # uv project — pytest + httpx + pyyaml + tenacity
+├── conftest.py            # session/function fixtures + heavy auto-skip + diag bundle hook
+├── helpers/
+│   ├── cli.py             # subprocess wrapper + CommandError
+│   ├── env.py             # defaults (KIND_CLUSTER, IMG, NS_*, paths)
+│   ├── api_client.py      # httpx wrapper for ui-api
+│   ├── chart_yaml.py      # pyyaml-based chart manifest assertions
+│   ├── otel_log.py        # collector debug-exporter log → typed Spans
+│   ├── port_forward.py    # context manager
+│   └── waits.py           # polling helpers (asc phase, asc gone)
+├── scripts/               # CLI orchestration only — no assertion logic
+│   ├── _common.sh         # shared defaults + log helpers
+│   ├── kind-up.sh         # make setup-test-e2e + image build/load
+│   ├── cert-manager.sh    # apply pinned cert-manager + wait
+│   ├── helm-install.sh    # parametric (--otel, --log-format, --image, ...)
+│   ├── load-image.sh      # podman save → kind load (collector, patched ui-api)
+│   ├── cleanup.sh         # uninstall + delete ns (--kind also deletes Kind cluster)
+│   └── diag-bundle.sh     # state + logs capture for failure post-mortem
+└── tests/
+    ├── chart/
+    │   ├── test_helm_lint.py
+    │   ├── test_helm_matrix.py        # 7 parametrized contracts
+    │   └── test_helm_real_install.py
+    ├── lifecycle/
+    │   ├── test_asc_create_smoke.py   # 1-node CR happy path
+    │   └── test_ginkgo.py             # subprocess go test wrapper
+    ├── api/
+    │   ├── test_api_crud.py           # A–G (#257-#260 regression guards)
+    │   └── test_api_k8s_create.py     # /api/v1/k8s/clusters CRUD
+    └── observability/
+        ├── test_logging.py            # text/json + X-Request-ID
+        └── test_otel_runtime.py       # collector + correlated spans (#265 guard)
+```
+
+The split is principled: bash where the contract is "this CLI invocation succeeds" (kind/cert-manager/helm install/cleanup), Python where the contract is "this response/manifest/log shape matches" (chart YAML, httpx responses, OTel spans).
+
+---
+
+## Reporting
+
+`uv run pytest` produces standard pytest output. For richer reports:
 
 ```bash
-# 1. Build and load the operator image into Kind.
-#    Kind+podman provider does not pick up `kind load docker-image` reliably,
-#    so use the tarball path which works on every Kind+podman combination.
-make docker-build IMG=acko-controller:e2e CONTAINER_TOOL=podman
-podman save -o /tmp/acko-controller-e2e.tar localhost/acko-controller:e2e
-KIND_EXPERIMENTAL_PROVIDER=podman \
-  kind load image-archive /tmp/acko-controller-e2e.tar \
-  --name aerospike-ce-kubernetes-operator-test-e2e
-# Verify image is on every node (control-plane + 3 workers in the default kind-config):
-for n in $(kubectl get nodes -o name | sed 's|node/||'); do
-  podman exec "$n" crictl images | grep acko-controller
-done
-
-# 2. Install cert-manager — required by the chart's webhook Certificate / Issuer
-#    resources. Pinned to the same version test/utils/utils.go uses.
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.19.3/cert-manager.yaml
-kubectl wait deployment/cert-manager-webhook --for=condition=Available -n cert-manager --timeout=5m
-sleep 10  # webhook CA still propagating after Available=true
-
-# 3. Helm install — the chart's aerospike-ce-kubernetes-operator-crds subchart
-#    bundles CRDs, so DO NOT run `make install` first (it would create
-#    CRDs without helm ownership labels and the helm install would refuse to
-#    take them over).
-helm install acko ./charts/aerospike-ce-kubernetes-operator \
-  --namespace aerospike-operator --create-namespace \
-  --set image.repository=localhost/acko-controller \
-  --set image.tag=e2e \
-  --set image.pullPolicy=Never \
-  --wait --timeout 5m
-
-# 4. Verify it came up via the chart, not via leftover state
-helm list -n aerospike-operator                                # STATUS=deployed
-kubectl get pods -n aerospike-operator                         # all Running
-kubectl get crd | grep acko                                    # both CRDs present
+uv run pytest -m smoke --html=/tmp/e2e-report.html --self-contained-html
 ```
 
-If `helm install` fails with "CustomResourceDefinition ... cannot be imported into the current release", it means you ran `make install` before. Clean up with `make uninstall` and retry.
-
-**Known gap**: at the time of writing, `test/e2e/e2e_suite_test.go:BeforeSuite` calls `make deploy`, not `helm install`. Until that is migrated, run e2e in two layers:
-
-1. Helm-install layer (manual/scripted, per the steps above) — confirms the chart works.
-2. Ginkgo layer (`make test-e2e` for scenario coverage) — accept that it currently uses `make deploy` for the controller. File a follow-up to migrate `BeforeSuite` to `helm install`.
-
-For chart-only validation that doesn't need the controller running, see Section 4 (`helm template` / `helm lint`) — that lane is fast and catches most chart regressions without spinning a Kind cluster.
+On failure, `conftest.py`'s `pytest_runtest_makereport` hook automatically calls `scripts/diag-bundle.sh`. The path to the bundle (`/tmp/e2e-diag-<timestamp>/`) appears in the failed test's report sections so it shows up in `--html` output and CI logs.
 
 ---
 
-## 2. Run Modes — pick before invoking
-
-| Mode | Command | When to use |
-|------|---------|-------------|
-| **Smoke** (no `heavy`) | `make test-e2e GINKGO_FLAGS='--label-filter="!heavy"'` | PR validation, fast (~5-8 min) |
-| **Full** (default) | `make test-e2e` | Pre-release, post-rebase, weekly main | 
-| **Single suite** | `go test -tags=e2e -run TestE2E -ginkgo.focus="Multi-rack" ./test/e2e/` | Iterating on one scenario |
-| **Heavy only** | `make test-e2e GINKGO_FLAGS='--label-filter="heavy"'` | Soak / performance lane |
-
-`heavy` label = scenarios that take >2 min, create PVCs, or scale ≥3 nodes. They're skipped in PR CI but mandatory before tagging a release.
-
-Heavy is applied at two levels in `test/e2e/`:
-- **Suite-level** (`var _ = Describe("X", Ordered, Label("heavy"), …)`): every scenario in `e2e_multirack_test.go`, `e2e_pvc_test.go`, and `e2e_template_test.go` is heavy by default.
-- **Context-level** (`Context("Y", Label("heavy"), …)`): used inside `e2e_cluster_test.go` and `e2e_features_test.go` to mark specific contexts as heavy while leaving siblings on the smoke lane.
-
-Either form satisfies `--label-filter`. Don't reason about heavy scope from a per-row annotation in this skill alone — confirm against the test file.
-
----
-
-## 3. Functional Scenarios — must pass
-
-Each row corresponds to a Ginkgo `Context` in `test/e2e/`. Status = green/red of the most recent `make test-e2e` you ran. Verify file:line still exists before claiming a scenario is covered (test names rot — see "Before recommending from memory" in the global CLAUDE.md).
-
-### Cluster lifecycle (`e2e_cluster_test.go`)
-
-- [ ] **Basic single-node cluster** — deploys, reaches `phase=Completed`, creates expected K8s resources (StatefulSet, ConfigMap, headless Service, PDB), populates `status.pods` correctly. Default lane.
-- [ ] **3-node cluster with PV storage** (`heavy`) — 3 pods, 3 PVCs, status reports cluster size + replication factor.
-- [ ] **Multi-rack 6-node cluster** (`heavy`) — 3 StatefulSets (one per rack), pods carry rack labels, 3 ConfigMaps, `status.size=6`, rack-distribution affinity is honored.
-- [ ] **ACL/Storage sample with cascadeDelete** (`heavy`) — admin user from Secret, PVCs created, cluster delete cleans PVCs. Confirms ACL Secret reconciliation does not block readiness.
-
-### Multi-rack specific (`e2e_multirack_test.go`) — entire suite is `heavy`
-- [ ] **Basic multi-rack deployment** — verifies StatefulSet count, pod-to-rack mapping, rack-aware service endpoints.
-- [ ] **Multi-rack scale up** — increase `spec.size`, pods land on the rack with capacity, no rebalance loop.
-
-### PVC management (`e2e_pvc_test.go`) — entire suite is `heavy`
-- [ ] **PVC creation for storage volumes** — PVC name pattern `<cluster>-<rackID>-<podOrdinal>`, status reflects bound state.
-- [ ] **CascadeDelete PVC cleanup** — `cascadeDelete: true` removes PVCs on cluster delete.
-- [ ] **Retained PVCs without cascadeDelete** — `cascadeDelete: false` (default) keeps PVCs after cluster delete; reattach on recreate.
-
-### Cluster templates (`e2e_template_test.go`) — entire suite is `heavy`
-- [ ] **Create cluster from template** — `AerospikeClusterTemplate` (cluster-scoped) → `AerospikeCluster` references it, fields are inherited correctly.
-- [ ] **Template drift detection** — modifying the template surfaces drift in `status.conditions`.
-
-### Enhanced features (`e2e_features_test.go`)
-- [ ] **Prometheus Custom Metrics** — `acko_*` metrics scrape on `:8080/metrics` after a cluster is created. Smoke lane.
-- [ ] **Per-Pod Status (configHash + podSpecHash)** — `status.pods[*].configHash` matches the pod annotation; `podSpecHash` reflects template hash. Smoke lane.
-- [ ] **Config change triggers Rolling Restart** (`heavy`) — patch `spec.aerospikeConfig`, pods restart in order, `phase` flows `Updating → Completed`.
-- [ ] **Scale Up and Down** (`heavy`) — `spec.size` change scales StatefulSet, `status.size` matches, no orphaned PVCs on scale-down + cascadeDelete.
-- [ ] **RollingUpdateBatchSize** (`heavy`) — `spec.rollingUpdate.batchSize=2` actually deletes 2 pods at a time during a config change.
-- [ ] **Paused Cluster** (`heavy`) — `spec.paused=true` halts reconciliation; resume continues from where it stopped. Phase reports `Paused`.
-- [ ] **PodDisruptionBudget** (`heavy`) — PDB is created by default for every cluster; setting `spec.disablePDB=true` deletes it on the next reconcile. (Verify against `e2e_features_test.go` "PodDisruptionBudget" Context.)
-
-### Webhook validation (covered by unit tests, but smoke-check during e2e)
-- [ ] CE constraint violations are rejected at admission: `size>8`, `namespaces>2`, `network.tls`, `xdr`, enterprise image (`aerospike-server-enterprise`), `feature-key-file`. Each must surface a clear error string.
-- [ ] Duplicate ServiceMonitor when `monitoring.enabled=true` is rejected (added in #235).
-
-### API CRUD smoke (UI api → DB → Aerospike)
-
-Until the cluster-manager `ui/` ships a Playwright e2e suite, exercise the api directly with `curl` against a live `helm install`. This catches regressions that the helm-template lane and the operator Ginkgo suite both miss — DB persistence, aerospike-py wiring, the policy/error envelope of every router. It also re-exercises the four 500-error fixes from cluster-manager #261 (sample-data partial failure, query `pkType`, records empty namespace, indexes idempotency) on the real binary.
-
-Prereq: a `Completed`-phase `AerospikeCluster` is up in the cluster (Section 3 "Basic single-node cluster" satisfies this) and you have a port-forward to the ui-api. Full bash recipe is in `reference/quick-commands.md` (Section "API CRUD smoke"); the must-pass checks are:
-
-- [ ] **Connection lifecycle** — `POST /api/v1/connections` returns 201 + a `id` + `createdAt`. `GET /api/v1/connections` includes it. `DELETE /api/v1/connections/{id}` returns 204 and a subsequent `GET` returns 404. Confirms PostgreSQL persistence is wired correctly.
-- [ ] **Cluster reachability** — `GET /api/v1/clusters/{conn_id}` returns 200 with `namespaces[].name == ["test"]` (or whatever the test cluster has). Confirms aerospike-py connection from inside the api pod to the in-cluster Aerospike service is working.
-- [ ] **sample-data partial-success contract** (#261/#257) — `POST /api/v1/sample-data/{conn_id}` body `{"namespace":"test","setName":"smoke","recordCount":10}` returns 201 with `recordsCreated`, `recordsFailed`, `indexesCreated`, `indexesFailed`. Critical: never 500 even if some indexes fail.
-- [ ] **records empty/sparse namespace** (#261/#259) — `GET /api/v1/records/{conn_id}?ns=test&pageSize=3` against a namespace with zero records returns 200 with `records: []`, NOT 500.
-- [ ] **query with `pkType=auto`** (#261/#258) — `POST /api/v1/query/{conn_id}` body `{"namespace":"test","maxRecords":3,"pkType":"auto"}` returns 200, behavior identical to omitting `pkType`. Confirms the spec default is honored at runtime.
-- [ ] **indexes create+delete idempotency** (#261/#260) — `POST /api/v1/indexes/{conn_id}` returns 201 with `state: building`. `DELETE /api/v1/indexes/{conn_id}?name=...&ns=...` returns 204. Both must agree with `GET /api/v1/indexes/{conn_id}` afterwards (no orphaned 500 + actual-success state divergence).
-- [ ] **500 envelope shape** (#261 follow-up) — when an endpoint genuinely 500s (force one with a known-bad request), the body has `detail`, `error`, and `requestId`, and the response carries `X-Request-ID`. Caller can grep server logs without backchanneling.
-
-### Logging + tracing runtime (UI api pod)
-
-These are NOT in `test/e2e/` Ginkgo. They run against a live `helm install` and confirm the cluster-manager api's logging stack works as intended. Both are required before any release that ships UI api changes.
-
-- [ ] **Default log format is text** — `helm install` with no overrides puts `LOG_FORMAT=text`. `kubectl logs <ui-api>` shows `2026-... INFO [logger] message` lines, not JSON.
-- [ ] **`LOG_FORMAT=json` produces structured logs** — `helm upgrade --reuse-values --set ui.env.logFormat=json` makes the api emit one JSON object per record. Each line has `timestamp`, `level`, `logger`, `message`, `request_id`.
-- [ ] **X-Request-ID correlation** — `curl -H "X-Request-ID: <id>" http://<ui-api-svc>/api/health` produces a JSON log line whose `request_id` field equals `<id>`, AND the response carries `x-request-id: <id>` so the caller can correlate without server access.
-- [ ] **`OTEL_SDK_DISABLED=true` (default)** — pod env shows `OTEL_SDK_DISABLED=true`. No `OTEL_EXPORTER_OTLP_*` env, no outbound traffic to common collector ports (4317/4318) — Section 5 has a tcpdump check for the latter.
-- [ ] **OTel opt-in — env wiring** — `helm upgrade --set ui.api.otel.enabled=true,ui.api.otel.endpoint=http://<collector>:4317` flips `OTEL_SDK_DISABLED=false` and adds `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_PROTOCOL`, `OTEL_TRACES_SAMPLER`, `OTEL_SERVICE_NAME=aerospike-cluster-manager-api`.
-- [ ] **OTel opt-in — runtime export** — deploy an OpenTelemetry Collector (e.g. `otel/opentelemetry-collector-contrib` with the `debug` exporter) at `otel-collector.otel.svc.cluster.local:4317`, generate traffic to a few endpoints (`/api/v1/connections`, `/api/openapi.json`), and confirm the collector logs:
-   1. `Traces resource spans` with `service.name: aerospike-cluster-manager-api`.
-   2. Parent HTTP spans (`Name: GET /api/v1/connections`, `http.method=GET`, `http.route=...`) sharing a Trace ID with the corresponding asyncpg `SELECT` child spans — proves trace propagation across HTTP → DB.
-   3. `Metrics resource metrics` data points on the same service.
-- [ ] **trace_id in middleware-emitted logs is null — by design** — the `request_logging_middleware` writes its `GET <path> <status> <ms>ms` record AFTER the route handler returns, when the OTel span is already closed. So that JSON log line shows `"trace_id": null, "span_id": null` even with OTel fully enabled. Logs emitted from inside route handlers (where the span is still active) DO carry real trace/span IDs. Don't treat the middleware null as a regression. If future work moves the access log emit inside the span, this line gets deleted.
-
-Quick recipes:
-
-```bash
-# (a) X-Request-ID round-trip
-NS=aerospike-operator
-POD=$(kubectl get pod -n $NS -l app.kubernetes.io/component=ui-api -o jsonpath='{.items[0].metadata.name}')
-kubectl port-forward -n $NS svc/acko-aerospike-ce-kubernetes-operator-ui-api 18000:80 &
-sleep 2
-curl -sI -H "X-Request-ID: my-trace-001" http://localhost:18000/api/health | grep -i x-request-id   # response header
-kubectl logs -n $NS $POD -c api --since=30s | grep my-trace-001                                       # log correlation
-```
-
-```bash
-# (b) OTel runtime — collector + helm upgrade + verify spans
-# Deploy a collector with the debug exporter so spans land in collector stdout.
-# (Full collector YAML lives in reference/quick-commands.md.)
-kubectl apply -f reference/otel-collector.yaml
-kubectl wait deploy/otel-collector --for=condition=Available -n otel --timeout=3m
-
-helm upgrade acko ./charts/aerospike-ce-kubernetes-operator -n aerospike-operator --reuse-values \
-  --set ui.env.logFormat=json \
-  --set ui.api.otel.enabled=true \
-  --set ui.api.otel.endpoint=http://otel-collector.otel.svc.cluster.local:4317 \
-  --set ui.api.otel.protocol=grpc \
-  --wait --timeout 5m
-
-# Wait for the new ui-api rollout and refresh the POD variable
-kubectl rollout status deploy/acko-aerospike-ce-kubernetes-operator-ui-api -n $NS
-
-# Generate traffic and look for HTTP + DB spans sharing a trace
-kubectl port-forward -n $NS svc/acko-aerospike-ce-kubernetes-operator-ui-api 18000:80 &
-sleep 2
-for ep in /api/health /api/v1/connections /api/openapi.json; do curl -s -o /dev/null http://localhost:18000$ep; done
-
-kubectl logs -n otel deploy/otel-collector --since=60s | \
-  grep -E "service.name|Trace ID|Name |http.method|http.route|db.system"
-# Expect: service.name=aerospike-cluster-manager-api; one Trace ID
-# spanning a "GET /api/v1/connections" parent + asyncpg SELECT children.
-```
-
----
-
-## 4. Helm Chart Scenarios — `helm template` + `helm lint`
-
-Run from `charts/aerospike-ce-kubernetes-operator/`. These are NOT in `test/e2e/`; they're a separate gate that catches chart regressions like the split-mode toggle bugs from PR #236.
-
-```bash
-cd charts/aerospike-ce-kubernetes-operator && helm lint .
-```
-
-For each mode below, run `helm template foo . --set <args>` and verify the listed resources / properties exist:
-
-| Mode | Set args | Must exist | Must NOT exist |
-|------|----------|------------|----------------|
-| Operator only | (defaults) | Operator Deployment, CRD, ClusterRole | UI Deployment, ServiceMonitor |
-| UI full (api+web) | `ui.enabled=true,ui.networkPolicy.enabled=true,ui.tests.enabled=true` | api Deployment, web Deployment, both Services, NetworkPolicy with both ports (`8000` + `3100`), helm-test pod | — |
-| UI api-only | `ui.enabled=true,ui.web.enabled=false,ui.ingress.target=api,ui.networkPolicy.enabled=true,ui.tests.enabled=true` | api Deployment, api Service, NetworkPolicy with ONLY `:8000`, helm-test pod | web Deployment, web Service |
-| UI web-only | `ui.enabled=true,ui.api.enabled=false,ui.web.env.apiUrl=http://x,ui.networkPolicy.enabled=true,ui.tests.enabled=true` | web Deployment, web Service, NetworkPolicy with ONLY `:3100`, web Pod has `automountServiceAccountToken: false` | api Deployment, api Service, helm-test pod |
-| OTel disabled (default) | `ui.enabled=true` | api env contains `OTEL_SDK_DISABLED=true` | (no `OTEL_EXPORTER_OTLP_ENDPOINT`) |
-| OTel enabled | `ui.enabled=true,ui.api.otel.enabled=true,ui.api.otel.endpoint=http://col:4317` | api env contains `OTEL_SDK_DISABLED=false` AND `OTEL_EXPORTER_OTLP_ENDPOINT=http://col:4317` AND `OTEL_TRACES_SAMPLER` | — |
-| ingress.target failfast | `ui.enabled=true,ui.web.enabled=false,ui.ingress.enabled=true` (default `target=web`) | `helm template` must FAIL with a clear error pointing at `ui.ingress.target` | — |
-
-A successful chart pass = `helm lint` clean + every row above renders / fails as documented.
-
-Beyond `helm template`, run a real `helm install` against the Kind cluster at least once per release to catch issues that only surface during apply (CRD ordering, hook race, RBAC propagation):
-
-```bash
-helm install acko-test ./charts/aerospike-ce-kubernetes-operator \
-  --namespace aerospike-operator-test --create-namespace \
-  --wait --timeout 5m
-helm test acko-test -n aerospike-operator-test          # runs the bundled test pods
-helm uninstall acko-test -n aerospike-operator-test
-kubectl delete ns aerospike-operator-test
-```
-
-`helm test` is what surfaces the `tests/test-api-connectivity.yaml` regression discussed in PR #236 — the helm-template lane alone won't catch a hanging test pod.
-
----
-
-## 5. Performance / Soak Checks
-
-These don't gate PRs but are required before tagging a minor release. Record results in `project-hub/docs/docs/history/releases/<version>/perf.md`.
-
-| Check | How | Acceptance |
-|-------|-----|------------|
-| Reconcile loop budget | Enable operator metrics, deploy a 6-node multi-rack, run `kubectl edit asc` 10× with no-op edits | p99 reconcile duration < 2 s; circuit breaker stays in `Closed` |
-| Rolling restart cadence | 8-node cluster + `RollingUpdateBatchSize=2`, trigger config change | Restart completes in `(size / batchSize) * (warm_restart_seconds + 30s)`; no `BackoffActive` |
-| Scale-up burst | Single-node → 8-node in one patch | All pods `Ready` < 5 min on Kind; PVC creation does not block |
-| Webhook latency | `kubectl apply` 100 invalid CRs in a tight loop | 100% rejected, no API-server timeout, operator stays `Ready` |
-| Memory ceiling | Operator pod under 6-node multi-rack soak (1h) | RSS < 256 MiB; no OOM, no fd leak |
-| OTel egress when disabled | Default install + `tcpdump -i any port 4317 or port 4318` for 10 min | 0 packets — confirms `OTEL_SDK_DISABLED=true` actually short-circuits |
-
----
-
-## 6. Diagnostic Bundle on Failure
-
-When any scenario fails, capture this BEFORE running `make cleanup-test-e2e` (which deletes the Kind cluster):
-
-```bash
-# 1. Operator + workload state
-kubectl get pods,asc,statefulset,configmap,pvc,pdb -A -o wide > /tmp/e2e-state.txt
-kubectl describe asc -A > /tmp/e2e-describe.txt
-kubectl logs -n aerospike-operator -l control-plane=controller-manager --tail=2000 > /tmp/e2e-operator.log
-
-# 2. Failing pod
-kubectl logs -n <ns> <failing-pod> --previous > /tmp/e2e-pod.log 2>&1 || true
-kubectl describe pod -n <ns> <failing-pod> > /tmp/e2e-pod-describe.txt
-
-# 3. Events (chronological)
-kubectl get events -A --sort-by='.lastTimestamp' > /tmp/e2e-events.txt
-
-# 4. CRD + webhook config
-kubectl get crd aerospikeclusters.acko.io -o yaml > /tmp/e2e-crd.yaml
-kubectl get validatingwebhookconfiguration -o yaml > /tmp/e2e-webhook.yaml
-```
-
-Attach all of `/tmp/e2e-*` to the failing PR / issue. Then run `make cleanup-test-e2e`.
-
----
-
-## 7. Common Failures — first-look table
+## Common failures — first-look table
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
-| `kind create cluster` hangs on macOS | Podman machine not running, or rootful socket missing | `podman machine start && podman system service --time=0 &` |
-| Operator pod `ImagePullBackOff` for `controller:latest` | `make docker-build` skipped, image not loaded into Kind | `make docker-build IMG=... && kind load docker-image ...` |
-| `phase=Error` on first reconcile, no useful logs | Webhook rejected the CR but kubectl apply was server-side | check `kubectl get events`; webhook errors land there as Warning |
-| `phase=BackoffActive` (not Error, not Completed) | Reconciliation Circuit Breaker tripped after repeated failures | dump `status.conditions[?(@.type=="ReconcileBackoff")]`; reset by editing the CR or restarting the operator |
-| Helm template fails for `ingress.target=web` + `web.enabled=false` | This is the chart's own failfast (intentional, since #236) | set `ui.ingress.target=api` or enable web |
-| e2e test passes locally, fails in CI | Different `CONTAINER_TOOL` (Docker vs Podman) | confirm the workflow sets `CONTAINER_TOOL=podman KIND_PROVIDER=podman` |
+| `kind create cluster` hangs on macOS | Podman machine not running | `podman machine start && podman system service --time=0 &` |
+| Operator pod `ImagePullBackOff` for `controller:latest` | Image not loaded into Kind | re-run `bash scripts/kind-up.sh` |
+| `phase=Error` on first reconcile, no useful logs | Webhook rejected CR (server-side apply ate the message) | `kubectl get events -n <ns>` — webhook errors land there as Warning |
+| `phase=BackoffActive` (not Error, not Completed) | Reconciliation Circuit Breaker tripped | inspect `.status.conditions[?(@.type=="ReconcileBackoff")]`; reset by editing the CR or restarting operator |
+| `helm template` fails for `ingress.target=web` + `web.enabled=false` | Chart's intentional failfast (since #236) | set `ui.ingress.target=api` or enable web |
+| e2e passes locally, fails in CI | Different `CONTAINER_TOOL` (Docker vs Podman) | confirm CI sets `CONTAINER_TOOL=podman KIND_PROVIDER=podman` |
+| Collector image `0.115.0` not found on docker.io | Tag rotated out of registry | `tests/observability/test_otel_runtime.py` auto-falls back to `$COLLECTOR_IMAGE` (defaults to `:latest`) and reloads |
+| OTel env wired but no spans at collector | `FastAPIInstrumentor` regression | `test_otel_runtime_emits_correlated_traces` fails with "no opentelemetry.instrumentation.fastapi scope" — re-apply cluster-manager #265 |
 
 ---
 
-## 8. Reporting Format
+## When to update
 
-After a run, summarize for the user in this exact shape:
+- A new `Context(...)` lands in `test/e2e/` (the operator's Ginkgo) → no change here; `tests/lifecycle/test_ginkgo.py` runs the whole suite. If it tests a brand-new concern (e.g. backup), add a section above and a new `tests/<area>/test_<thing>.py`.
+- A new chart toggle is introduced (e.g. `ui.postgresql.external`) → add a new parametrize entry to `tests/chart/test_helm_matrix.py`.
+- A regression caught in production → add a `regression_guard`-marked test that re-asserts the contract. Don't grow the markdown.
+- A perf budget renegotiated → record both old and new values in the perf section.
 
-```
-e2e run on <branch>@<short-sha> — <date>
-Mode:        smoke / full / heavy-only
-Duration:    <Xm>
-Outcome:     PASS / FAIL
-
-Functional:  N/M scenarios passed
-Helm chart:  N/M modes verified
-Performance: <list>
-
-Failures (if any):
-  - <Context name> — <one-line cause> — <link to logs>
-```
-
-Do NOT claim "all scenarios pass" without listing the file paths you verified — historical drift between the test file and this checklist has happened before (e.g. when scenarios were renamed during the rack-per-StatefulSet refactor).
-
----
-
-## 9. When to Update This Playbook
-
-Add a new row whenever:
-- A new `Context(...)` is added in `test/e2e/`
-- A new chart-level toggle is introduced (e.g. the `ui.api.enabled` / `ui.web.enabled` split in #236, or future `ui.postgresql.external`)
-- A regression is caught in production that the existing checklist did not surface — add the smallest possible reproducer
-- A performance budget is renegotiated — the previous value goes into the table footnote so future-us can spot drift
-
-Skill version is implicit (commit hash). Don't bump anything in this file; the git log is the changelog.
+The skill version is implicit in `git log` — don't bump anything in this file.

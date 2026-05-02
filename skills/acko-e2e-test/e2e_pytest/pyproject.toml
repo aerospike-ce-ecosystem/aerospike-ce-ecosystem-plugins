@@ -1,0 +1,65 @@
+[project]
+name = "acko-e2e-pytest"
+version = "0.1.0"
+description = "ACKO end-to-end test suite — eval contracts as pytest tests"
+requires-python = ">=3.12"
+dependencies = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-html>=4.1",
+    "httpx>=0.28",
+    "pyyaml>=6.0",
+    "tenacity>=9.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.7",
+    "pyright>=1.1.380",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    # Lane markers — pick at most one per test
+    "chart: chart-only tests; no Kind cluster needed (~1 min, fastest gate)",
+    "smoke: cluster + api + observability; chart's prereq is satisfied (~10 min)",
+    "full: needs Kind cluster + invokes the in-tree Ginkgo go test (~30+ min)",
+    "heavy: long-running scenarios — explicitly opt-in, NEVER auto-selected",
+    # Resource markers — orthogonal to lane; for parallelism + diagnostics
+    "needs_kind: requires a Kind cluster fixture",
+    "needs_helm: requires the operator helm release fixture",
+    "needs_live_cluster: requires a Completed AerospikeCluster fixture",
+    "needs_collector: requires the OTel collector deployed",
+    "regression_guard: re-asserts a specific past regression — failure means the bug came back",
+]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--tb=short",
+    "--showlocals",
+]
+log_cli = true
+log_cli_level = "INFO"
+log_cli_format = "%(asctime)s %(levelname)-7s %(name)s | %(message)s"
+log_cli_date_format = "%H:%M:%S"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF", "T20"]
+# T20 forbids print() — use the logger.
+# RUF002 (ambiguous unicode in docstrings) is too aggressive — em/en dashes are
+# intentional in our prose-style docstrings.
+ignore = ["RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["B008"]   # pytest fixture defaults are FastAPI-style by design
+
+[tool.pyright]
+include = ["helpers", "tests", "conftest.py"]
+typeCheckingMode = "basic"
+pythonVersion = "3.12"

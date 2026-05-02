@@ -1,0 +1,78 @@
+name: skill acko-e2e-test — chart lane (Linux)
+
+# The chart lane needs no Kind cluster — only helm + uv + the operator chart.
+# It's the fastest gate to confirm the skill's pytest project parses, the
+# helpers import, and the 7-mode helm template matrix renders correctly on
+# Linux (the bash scripts the helpers shell out to are written for both
+# macOS and Linux, but verification on Linux is the actual proof).
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'skills/acko-e2e-test/**'
+      - '.github/workflows/skill-e2e-chart.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'skills/acko-e2e-test/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  chart-lane:
+    name: Run on Ubuntu
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout plugins repo
+        uses: actions/checkout@v4
+
+      - name: Checkout operator repo (for chart + samples)
+        uses: actions/checkout@v4
+        with:
+          repository: aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator
+          path: aerospike-ce-kubernetes-operator
+          ref: main
+
+      - name: Install helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.18.4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: latest
+
+      - name: Sync deps
+        working-directory: skills/acko-e2e-test/e2e_pytest
+        run: uv sync
+
+      - name: Lint
+        working-directory: skills/acko-e2e-test/e2e_pytest
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Typecheck
+        working-directory: skills/acko-e2e-test/e2e_pytest
+        run: uv run pyright .
+
+      - name: Run chart tests
+        working-directory: skills/acko-e2e-test/e2e_pytest
+        env:
+          # The default OPERATOR_REPO assumes a sibling layout (workspace
+          # umbrella). In CI we check the operator out alongside this repo
+          # and point env at it.
+          OPERATOR_REPO: ${{ github.workspace }}/aerospike-ce-kubernetes-operator
+        run: uv run pytest -m chart -v --html=/tmp/chart-report.html --self-contained-html
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chart-report
+          path: /tmp/chart-report.html
+          if-no-files-found: ignore
