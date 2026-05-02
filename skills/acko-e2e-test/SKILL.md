@@ -145,17 +145,51 @@ These are NOT in `test/e2e/` Ginkgo. They run against a live `helm install` and 
 - [ ] **`LOG_FORMAT=json` produces structured logs** — `helm upgrade --reuse-values --set ui.env.logFormat=json` makes the api emit one JSON object per record. Each line has `timestamp`, `level`, `logger`, `message`, `request_id`.
 - [ ] **X-Request-ID correlation** — `curl -H "X-Request-ID: <id>" http://<ui-api-svc>/api/health` produces a JSON log line whose `request_id` field equals `<id>`, AND the response carries `x-request-id: <id>` so the caller can correlate without server access.
 - [ ] **`OTEL_SDK_DISABLED=true` (default)** — pod env shows `OTEL_SDK_DISABLED=true`. No `OTEL_EXPORTER_OTLP_*` env, no outbound traffic to common collector ports (4317/4318) — Section 5 has a tcpdump check for the latter.
-- [ ] **OTel opt-in** (skip until cluster-manager PR #262 is merged) — `helm upgrade --set ui.api.otel.enabled=true,ui.api.otel.endpoint=http://<collector>:4317` flips `OTEL_SDK_DISABLED=false` and adds `OTEL_EXPORTER_OTLP_ENDPOINT`. Once #262 is merged, JSON logs additionally carry `otelTraceID` / `otelSpanID` (currently absent — image at `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api:latest` does not bundle the OTel hook code).
+- [ ] **OTel opt-in — env wiring** — `helm upgrade --set ui.api.otel.enabled=true,ui.api.otel.endpoint=http://<collector>:4317` flips `OTEL_SDK_DISABLED=false` and adds `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_PROTOCOL`, `OTEL_TRACES_SAMPLER`, `OTEL_SERVICE_NAME=aerospike-cluster-manager-api`.
+- [ ] **OTel opt-in — runtime export** — deploy an OpenTelemetry Collector (e.g. `otel/opentelemetry-collector-contrib` with the `debug` exporter) at `otel-collector.otel.svc.cluster.local:4317`, generate traffic to a few endpoints (`/api/v1/connections`, `/api/openapi.json`), and confirm the collector logs:
+   1. `Traces resource spans` with `service.name: aerospike-cluster-manager-api`.
+   2. Parent HTTP spans (`Name: GET /api/v1/connections`, `http.method=GET`, `http.route=...`) sharing a Trace ID with the corresponding asyncpg `SELECT` child spans — proves trace propagation across HTTP → DB.
+   3. `Metrics resource metrics` data points on the same service.
+- [ ] **trace_id in middleware-emitted logs is null — by design** — the `request_logging_middleware` writes its `GET <path> <status> <ms>ms` record AFTER the route handler returns, when the OTel span is already closed. So that JSON log line shows `"trace_id": null, "span_id": null` even with OTel fully enabled. Logs emitted from inside route handlers (where the span is still active) DO carry real trace/span IDs. Don't treat the middleware null as a regression. If future work moves the access log emit inside the span, this line gets deleted.
 
-Quick recipe:
+Quick recipes:
 
 ```bash
+# (a) X-Request-ID round-trip
 NS=aerospike-operator
 POD=$(kubectl get pod -n $NS -l app.kubernetes.io/component=ui-api -o jsonpath='{.items[0].metadata.name}')
 kubectl port-forward -n $NS svc/acko-aerospike-ce-kubernetes-operator-ui-api 18000:80 &
 sleep 2
 curl -sI -H "X-Request-ID: my-trace-001" http://localhost:18000/api/health | grep -i x-request-id   # response header
 kubectl logs -n $NS $POD -c api --since=30s | grep my-trace-001                                       # log correlation
+```
+
+```bash
+# (b) OTel runtime — collector + helm upgrade + verify spans
+# Deploy a collector with the debug exporter so spans land in collector stdout.
+# (Full collector YAML lives in reference/quick-commands.md.)
+kubectl apply -f reference/otel-collector.yaml
+kubectl wait deploy/otel-collector --for=condition=Available -n otel --timeout=3m
+
+helm upgrade acko ./charts/aerospike-ce-kubernetes-operator -n aerospike-operator --reuse-values \
+  --set ui.env.logFormat=json \
+  --set ui.api.otel.enabled=true \
+  --set ui.api.otel.endpoint=http://otel-collector.otel.svc.cluster.local:4317 \
+  --set ui.api.otel.protocol=grpc \
+  --wait --timeout 5m
+
+# Wait for the new ui-api rollout and refresh the POD variable
+kubectl rollout status deploy/acko-aerospike-ce-kubernetes-operator-ui-api -n $NS
+
+# Generate traffic and look for HTTP + DB spans sharing a trace
+kubectl port-forward -n $NS svc/acko-aerospike-ce-kubernetes-operator-ui-api 18000:80 &
+sleep 2
+for ep in /api/health /api/v1/connections /api/openapi.json; do curl -s -o /dev/null http://localhost:18000$ep; done
+
+kubectl logs -n otel deploy/otel-collector --since=60s | \
+  grep -E "service.name|Trace ID|Name |http.method|http.route|db.system"
+# Expect: service.name=aerospike-cluster-manager-api; one Trace ID
+# spanning a "GET /api/v1/connections" parent + asyncpg SELECT children.
 ```
 
 ---
