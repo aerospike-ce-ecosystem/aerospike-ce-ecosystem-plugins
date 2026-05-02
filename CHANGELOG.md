@@ -8,6 +8,20 @@ See [VERSIONING.md](./VERSIONING.md) for the compatibility matrix and deprecatio
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-05-02
+
+### Added
+
+- **Skills**:
+  - `acko-e2e-test` — Canonical ACKO end-to-end test playbook for release verification. Documents Ginkgo scenarios, the mandatory `helm install`-based operator setup, and performance checks (PR #6).
+- **Skill updates**:
+  - `aerospike-py-api` — OTel runtime export check + middleware-null-trace_id note (PR #7).
+  - `aerospike-py-fastapi` — API CRUD smoke pattern for the ui-api → DB → Aerospike path (PR #8).
+
+### Changed
+
+- Plugin manifest bumped to `1.1.0` to invalidate stale local plugin caches and surface the new `acko-e2e-test` skill.
+
 ## [1.0.0] - 2026-04-30
 
 Initial public release. Plugin manifest version is `1.0.0` (see `.claude-plugin/plugin.json`).
@@ -26,5 +40,6 @@ Initial public release. Plugin manifest version is `1.0.0` (see `.claude-plugin/
   - `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` published for plugin discovery.
   - Repository under `aerospike-ce-ecosystem` GitHub org.
 
-[Unreleased]: https://github.com/aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins/releases/tag/v1.0.0
