@@ -8,6 +8,17 @@ See [VERSIONING.md](./VERSIONING.md) for the compatibility matrix and deprecatio
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-05-04
+
+### Added
+
+- **Skills**:
+  - `acko-e2e-test` — Hybrid pytest rewrite: Python for assertions, bash for CLI orchestration. Tightens release-verification scenarios and reduces flakiness on the CLI orchestration boundary (PR #10).
+
+### CI/CD
+
+- **Daily Release workflow**: New `daily-release.yml` GitHub Actions workflow that auto-detects unreleased commits, computes the next semver from Conventional Commits, and publishes a GitHub release with Claude-generated notes. Mirrors the pattern already used by `aerospike-py` and `aerospike-cluster-manager` so all four ecosystem repos share the same release cadence.
+
 ## [1.1.0] - 2026-05-02
 
 ### Added
@@ -40,6 +51,7 @@ Initial public release. Plugin manifest version is `1.0.0` (see `.claude-plugin/
   - `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` published for plugin discovery.
   - Repository under `aerospike-ce-ecosystem` GitHub org.
 
-[Unreleased]: https://github.com/aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins/releases/tag/v1.0.0
