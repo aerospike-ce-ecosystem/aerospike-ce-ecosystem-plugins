@@ -328,7 +328,18 @@ All take `(left, right)` and return a boolean expression.
 | `regex_compare(regex, flags, bin_expr)` | Regex match on string expression |
 | `geo_compare(left, right)` | Geospatial contains/within comparison |
 
-`regex_compare` flags: `0` = default, `1` = extended, `2` = icase, `4` = nosub, `8` = newline.
+`regex_compare` flags are exposed as module-level constants on `aerospike_py`
+(values mirror POSIX `regex.h`):
+
+| Constant | Value | Meaning |
+|----------|-------|---------|
+| `REGEX_NONE` | 0 | Defaults |
+| `REGEX_EXTENDED` | 1 | POSIX extended syntax |
+| `REGEX_ICASE` | 2 | Case-insensitive |
+| `REGEX_NOSUB` | 4 | Don't report match position |
+| `REGEX_NEWLINE` | 8 | `.` doesn't match newline |
+
+Combine with `|`: `REGEX_ICASE | REGEX_NEWLINE`. Avoid passing magic integers.
 
 ### Control Flow
 
@@ -376,13 +387,49 @@ expr = exp.cond(
 #### Regex and Geo
 
 ```python
-expr = exp.regex_compare(r"^user_\d+$", 0, exp.string_bin("username"))
+import aerospike_py
+expr = exp.regex_compare(
+    r"^user_\d+$", aerospike_py.REGEX_NONE, exp.string_bin("username"))
 
 expr = exp.geo_compare(
     exp.geo_bin("location"),
     exp.geo_val('{"type":"AeroCircle","coordinates":[[-122.0,37.5],5000.0]}'),
 )
 ```
+
+#### PK Regex Filter Scan
+
+Filter records by a regex match on the **user key** (PK). Equivalent to
+the Java client's `Exp.regexCompare(pattern, RegexFlag.NONE, Exp.key(Exp.Type.STRING))`.
+
+```python
+import aerospike_py
+from aerospike_py import exp
+
+# Records must be written with POLICY_KEY_SEND so the user key is stored.
+client.put(("test", "users", "aaa001"), {"v": 1},
+           policy={"key": aerospike_py.POLICY_KEY_SEND})
+
+expr = exp.regex_compare(
+    "^aaa.*",
+    aerospike_py.REGEX_NONE,
+    exp.key(exp.EXP_TYPE_STRING),
+)
+records = client.query("test", "users").results(
+    policy={"filter_expression": expr})
+for r in records:
+    print(r.key.user_key, r.bins)
+```
+
+Operational notes:
+
+- This is a **full set scan + server-side filter**, not a primary-index lookup.
+  Aerospike's primary index keys on the digest, not the user key string —
+  there is no PK B-tree range scan.
+- Records written without `POLICY_KEY_SEND` have no stored user key and never
+  match a `key()` expression (the scan returns an empty list).
+- Avoid for hot-path prefix lookups on large sets. For production prefix
+  search, model with a separate prefix bin + secondary index, or a lookup-set.
 
 #### Metadata Filters
 

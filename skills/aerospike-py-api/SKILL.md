@@ -177,17 +177,27 @@ Predicates: `p.equals(bin, val)`, `p.between(bin, min, max)`, `p.contains(bin, i
 Server-side filtering (Aerospike 5.2+). No secondary index required. Policy key: `"filter_expression"`.
 
 ```python
+import aerospike_py
 from aerospike_py import exp
+
 expr = exp.and_(exp.gt(exp.int_bin("age"), exp.int_val(18)),
                 exp.eq(exp.string_bin("status"), exp.string_val("active")))
 record = client.get(key, policy={"filter_expression": expr})
 
-# Also: exp.bin_exists("f"), exp.ttl(), exp.regex_compare(r"^u_", 0, exp.string_bin("n"))
+# Regex (use REGEX_* constants, not magic integers):
+exp.regex_compare(r"^u_", aerospike_py.REGEX_NONE, exp.string_bin("n"))
+
+# PK regex filter scan (Java client Exp.regexCompare(..., Exp.key(...)) equivalent).
+# Requires POLICY_KEY_SEND on writes; performs a full set scan with server-side
+# filtering — NOT a primary-index lookup.
+exp.regex_compare("^aaa.*", aerospike_py.REGEX_NONE, exp.key(exp.EXP_TYPE_STRING))
+
+# Also: exp.bin_exists("f"), exp.ttl()
 # Variable binding: exp.let_(exp.def_("x", exp.int_bin("a")), exp.gt(exp.var("x"), exp.int_val(10)))
 # Works with: get, put, batch_read, query.results, operate
 ```
 
-Detail: `./reference/read.md`
+Detail: `./reference/read.md` · Constants: `./reference/constants.md` (Regex Flags)
 
 ## 10. Admin & Infrastructure
 

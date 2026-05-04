@@ -27,6 +27,7 @@ All constants are importable from `aerospike_py`.
   - [Index Data Type](#index-data-type)
   - [Index Collection Type](#index-collection-type)
 - [Privilege Constants](#privilege-constants)
+- [Regex Flags](#regex-flags)
 - [Auth & Log Constants](#auth--log-constants)
   - [Auth Mode](#auth-mode)
   - [Log Level](#log-level)
@@ -256,6 +257,32 @@ For use with `operate()` and `operate_ordered()`.
 | PRIV_READ_WRITE_UDF | 12 | Read-write with UDF |
 | PRIV_WRITE | 13 | Write privilege |
 | PRIV_TRUNCATE | 14 | Truncate privilege |
+
+---
+
+## Regex Flags
+
+Used as the `flags` argument to `exp.regex_compare(pattern, flags, bin_expr)`.
+Values mirror POSIX `regex.h` and can be combined with bitwise OR.
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| REGEX_NONE | 0 | Use regex defaults |
+| REGEX_EXTENDED | 1 | POSIX extended regular expression syntax |
+| REGEX_ICASE | 2 | Case-insensitive matching |
+| REGEX_NOSUB | 4 | Do not report match positions |
+| REGEX_NEWLINE | 8 | `.` does not match newline |
+
+```python
+import aerospike_py
+from aerospike_py import exp
+
+expr = exp.regex_compare(
+    "^aaa.*",
+    aerospike_py.REGEX_ICASE | aerospike_py.REGEX_NEWLINE,
+    exp.string_bin("name"),
+)
+```
 
 ---
 
