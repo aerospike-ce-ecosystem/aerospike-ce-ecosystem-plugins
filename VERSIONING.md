@@ -17,6 +17,8 @@ A plugin version is expected to work with the components below; older or newer c
 | Plugin Version | ACKO | aerospike-py | Aerospike CE Server |
 |----------------|------|--------------|---------------------|
 | 1.0.0          | v1.0.0 (Helm chart 0.2.0) | 0.7.1 | 8.1.x (8.x supported) |
+| 1.1.0          | v1.0.0 (Helm chart 0.2.0) | 0.7.1 | 8.1.x (8.x supported) |
+| 1.2.0          | v1.2.1 | 0.10.0 | 8.1.x (8.x supported) |
 | Unreleased     | tracks ACKO `main` | tracks aerospike-py `main` | 8.x |
 
 Sources for the 1.0.0 row:
