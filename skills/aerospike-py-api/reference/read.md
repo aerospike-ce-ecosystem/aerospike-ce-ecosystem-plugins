@@ -429,7 +429,12 @@ Operational notes:
 - Records written without `POLICY_KEY_SEND` have no stored user key and never
   match a `key()` expression (the scan returns an empty list).
 - Avoid for hot-path prefix lookups on large sets. For production prefix
-  search, model with a separate prefix bin + secondary index, or a lookup-set.
+  search, denormalize a fixed-width prefix bin (e.g. `name_prefix_3 = name[:3]`)
+  and index it with `INDEX_STRING`, then query via
+  [Query & Secondary Index](#query--secondary-index) using
+  `predicates.equals("name_prefix_3", "aaa")` — Aerospike string SI supports
+  equality only (no range/prefix), so the prefix must be materialized at
+  write time. Alternatively, use a lookup-set keyed by the prefix.
 
 #### Metadata Filters
 
