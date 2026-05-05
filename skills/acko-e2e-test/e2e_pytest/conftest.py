@@ -23,9 +23,10 @@ import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
+import httpx
 import pytest
 
 # Make `helpers` and `scripts` reachable
@@ -40,6 +41,18 @@ from helpers.waits import wait_asc_completed  # noqa: E402
 
 logger = logging.getLogger(__name__)
 SCRIPTS = _THIS / "scripts"
+
+# Stream D contract C-5 — Keycloak local realm.
+# These match scripts/keycloak/acko-realm.json in the operator repo.
+KEYCLOAK_REALM = "acko"
+KEYCLOAK_CLIENT_ID = "acko-spa"
+KEYCLOAK_OTHER_CLIENT_ID = "acko-other"
+KEYCLOAK_AUDIENCE = "acko-api"
+KEYCLOAK_USERS = {
+    "admin": ("admin", "admin"),
+    "dev": ("dev-user", "dev"),
+    "prod": ("prod-user", "prod"),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +237,123 @@ def ui_api_pf(helm_release: dict) -> Iterator[str]:
 def api(ui_api_pf: str) -> Iterator[ApiClient]:
     with ApiClient(ui_api_pf) as client:
         yield client
+
+
+# ---------------------------------------------------------------------------
+# Keycloak fixtures (Stream D)
+# ---------------------------------------------------------------------------
+@pytest.fixture(scope="session")
+def keycloak_pf(kind_cluster: str) -> Iterator[str]:
+    """Port-forward to the in-cluster Keycloak Service and yield the base URL.
+
+    The local IdP is installed by `make run-local` / `make setup-test-e2e`
+    using bitnami/keycloak with the acko realm imported. We assume it is
+    already running — if it isn't, the fixture skips so unrelated lanes
+    aren't punished.
+    """
+    # First check the namespace exists; if not, skip cleanly so chart-only
+    # lanes that don't bring up Keycloak aren't forced to install it.
+    chk = run(
+        ["kubectl", "get", "ns", "keycloak", "--ignore-not-found", "-o", "name"],
+        check=False,
+        quiet=True,
+    )
+    if "namespace/keycloak" not in (chk.stdout or ""):
+        pytest.skip(
+            "Keycloak namespace not present — run `make run-local` or "
+            "`make setup-test-e2e` first to install the local IdP"
+        )
+
+    # Wait for the deployment in case fixture order beat the install.
+    run(
+        [
+            "kubectl",
+            "wait",
+            "--for=condition=Available",
+            "deployment/keycloak",
+            "-n",
+            "keycloak",
+            "--timeout=300s",
+        ],
+        check=False,
+        quiet=True,
+    )
+
+    with port_forward(
+        namespace="keycloak",
+        service="keycloak",
+        local_port=18080,
+        service_port=80,
+    ) as url:
+        yield url
+
+
+@pytest.fixture(scope="session")
+def keycloak_url(keycloak_pf: str) -> str:
+    """Base URL for the acko realm: e.g. http://localhost:18080/realms/acko."""
+    explicit = os.environ.get("KEYCLOAK_URL")
+    base = explicit.rstrip("/") if explicit else f"{keycloak_pf}/realms/{KEYCLOAK_REALM}"
+    # Sanity-poll the well-known so the first test failure is informative.
+    well_known = f"{base}/.well-known/openid-configuration"
+    last_err: Exception | None = None
+    for _ in range(30):
+        try:
+            r = httpx.get(well_known, timeout=3.0)
+            if r.status_code == 200:
+                return base
+            last_err = RuntimeError(f"{well_known} returned {r.status_code}")
+        except httpx.HTTPError as exc:
+            last_err = exc
+        import time as _time
+
+        _time.sleep(2)
+    raise RuntimeError(f"keycloak realm not ready at {well_known}: {last_err}")
+
+
+@pytest.fixture(scope="session")
+def keycloak_token(keycloak_url: str) -> Callable[..., str]:
+    """Factory that fetches a fresh access token via Resource-Owner-Password-Credentials.
+
+    Usage:
+        token = keycloak_token(role="dev")            # dev-user
+        token = keycloak_token(role="prod")           # prod-user
+        token = keycloak_token(client_id="acko-other")  # negative-aud test
+    """
+    cache: dict[tuple[str, str], str] = {}
+
+    def _token(
+        role: str = "dev",
+        client_id: str = KEYCLOAK_CLIENT_ID,
+    ) -> str:
+        if role not in KEYCLOAK_USERS:
+            raise KeyError(f"unknown keycloak role {role!r}; one of {list(KEYCLOAK_USERS)}")
+        username, password = KEYCLOAK_USERS[role]
+        key = (client_id, username)
+        if key in cache:
+            return cache[key]
+        token_url = f"{keycloak_url}/protocol/openid-connect/token"
+        resp = httpx.post(
+            token_url,
+            data={
+                "grant_type": "password",
+                "client_id": client_id,
+                "username": username,
+                "password": password,
+                "scope": "openid",
+            },
+            timeout=10.0,
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"keycloak token endpoint {token_url} returned {resp.status_code}: {resp.text}"
+            )
+        access = resp.json().get("access_token")
+        if not access:
+            raise RuntimeError(f"keycloak token response missing access_token: {resp.text}")
+        cache[key] = access
+        return access
+
+    return _token
 
 
 # ---------------------------------------------------------------------------
