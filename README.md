@@ -102,6 +102,8 @@ claude -p "Deploy a single-node Aerospike cluster for development on a kind clus
 claude -p "Deploy a single-node Aerospike cluster for development on a kind cluster" --model sonnet --disable-plugins
 ```
 
+> The `e2e_pytest/` scenario suite includes a **multi-cluster + Keycloak OIDC** scenario (common-cluster web + dev/prod operator-cluster API + bitnami/keycloak realm bootstrap). See [ACKO multi-cluster docs](https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/blob/main/docs/multi-cluster-keycloak.md).
+
 ## License
 
 MIT
