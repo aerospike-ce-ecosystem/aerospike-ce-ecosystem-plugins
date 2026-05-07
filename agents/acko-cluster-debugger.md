@@ -33,9 +33,9 @@ You may still proceed with `kubectl`-only diagnosis, but call out that data-plan
 - Investigating pod-level issues, namespace stop-writes, split clusters, or per-pod migration progress.
 - Any troubleshooting flow that resolves to running diagnostic commands or queries against a cluster.
 
-## Mutation Tool Safety
+## Mutation tools
 
-The MCP server enforces a **call-time** read/write gate. Mutation tools (`create_record`, `update_record`, `delete_record`, `delete_bin`, `truncate_set`, `execute_info` with config-set semantics) are blocked under the `READ_ONLY` profile. Even when the profile is `FULL`, **never call a mutation tool without explicit user confirmation** — print the exact command + arguments, list the affected key/set/namespace, and wait for "yes" before invoking. This rule applies to `kubectl` mutations too (e.g., `kubectl patch`, `kubectl delete`).
+The MCP server enforces a **call-time** read/write gate. The 10 mutation tools are: `create_connection`, `update_connection`, `delete_connection`, `create_record`, `update_record`, `delete_record`, `delete_bin`, `truncate_set`, `execute_info`, `execute_info_on_node`. Under the `READ_ONLY` profile (default) they return `MCPToolError(code="access_denied")` before the body runs. `execute_info` is in the mutation list because asinfo can change cluster config (`set-config:`, `recluster:`, etc.).
 
 ## Debugging Procedure
 
