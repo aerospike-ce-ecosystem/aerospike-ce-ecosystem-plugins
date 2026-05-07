@@ -49,11 +49,46 @@ claude plugin list
 | **aerospike-py-api** | "use aerospike-py to ..." | Full API reference — AsyncClient, CRUD, batch, CDT, query, expressions, observe, admin |
 | **aerospike-py-fastapi** | "build FastAPI app with Aerospike" | Production-ready FastAPI patterns — lifespan, DI, CRUD endpoints, error handling, metrics |
 
+### Cluster Manager MCP
+
+| Skill | Trigger | Description |
+|-------|---------|-------------|
+| **acm-mcp-init** | "register ACM MCP", "/acm-mcp-init" | Register one or many [aerospike-cluster-manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager) MCP endpoints with Claude Code so other skills/agents can read and operate live clusters. Multi-cluster ACKO friendly. |
+
 ### Agents
 
 | Agent | Description |
 |-------|-------------|
-| **acko-cluster-debugger** | Systematic K8s cluster debugging — pod status, events, logs, config analysis |
+| **acko-cluster-debugger** | Systematic cluster debugging. Uses ACM MCP tools (`mcp__aerospike-{prefix}__list_namespaces`, `__execute_info`, `__query`, `__get_record`) for data-plane diagnosis; falls back to `kubectl`/`asinfo` for K8s-plane (pods, events, logs). Phase 2 will replace the K8s side with MCP tools too. |
+
+## MCP integration
+
+This plugin uses the [aerospike-cluster-manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager) MCP server (21 tools at `/mcp`) for live cluster access. Endpoints are registered per cluster-manager instance — register one entry per ACKO Helm release if you operate multiple clusters.
+
+The plugin ships an **empty `.mcp.json`** by design: nothing auto-registers on install. Onboarding goes through the `acm-mcp-init` skill so the user explicitly chooses which URLs and tokens to wire up. This keeps the install surface minimal and avoids surprising users with a broken `localhost:8000` entry on machines that don't run ACM.
+
+```bash
+# 1. Start ACM somewhere reachable
+ACM_MCP_ENABLED=true uv run uvicorn aerospike_cluster_manager_api.main:app --reload
+
+# 2. Register the endpoint with Claude Code (or invoke the acm-mcp-init skill)
+claude mcp add --transport http aerospike-dev http://localhost:8000/mcp
+
+# 3. Use the cluster from any agent / chat
+#    "in dev cluster, list namespaces and get a sample record from sample_set"
+```
+
+For multi-cluster ACKO, register each cluster-manager separately:
+
+```bash
+claude mcp add --transport http aerospike-prod-us \
+  https://acm.prod-us.example.com/mcp \
+  -H "Authorization: Bearer $ACM_MCP_TOKEN"
+```
+
+Tools are addressable as `mcp__aerospike-<name>__<tool>` (e.g. `mcp__aerospike-prod-us__get_record`). Agents pick the right prefix from the user's wording ("in prod-us, …" → `aerospike-prod-us`).
+
+The default ACM access profile is `read_only` — mutation tools (`create_record`, `delete_*`, `truncate_set`, `execute_info` with config-set) are blocked at call time. Set `ACM_MCP_ACCESS_PROFILE=full` on the server to allow mutations.
 
 ## Prerequisites
 
