@@ -56,10 +56,10 @@ For each validated endpoint:
 
 ```bash
 # Without auth
-claude mcp add aerospike-${NAME} --transport http --url "${URL}"
+claude mcp add --transport http aerospike-${NAME} "${URL}"
 
 # With bearer token
-claude mcp add aerospike-${NAME} --transport http --url "${URL}" \
+claude mcp add --transport http aerospike-${NAME} "${URL}" \
   --header "Authorization: Bearer ${TOKEN}"
 ```
 
@@ -115,7 +115,7 @@ The skill is **idempotent**. Re-running with the same name updates the existing 
 
 ```bash
 claude mcp remove aerospike-${NAME} 2>/dev/null || true
-claude mcp add aerospike-${NAME} --transport http --url "${URL}" [...]
+claude mcp add --transport http aerospike-${NAME} "${URL}" [...]
 ```
 
 Mention this dance to the user before doing it so the audit trail is clear.

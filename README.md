@@ -70,7 +70,7 @@ This plugin uses the [aerospike-cluster-manager](https://github.com/aerospike-ce
 ACM_MCP_ENABLED=true uv run uvicorn aerospike_cluster_manager_api.main:app --reload
 
 # 2. Register the endpoint with Claude Code (or invoke the acm-mcp-init skill)
-claude mcp add aerospike-dev --transport http --url http://localhost:8000/mcp
+claude mcp add --transport http aerospike-dev http://localhost:8000/mcp
 
 # 3. Use the cluster from any agent / chat
 #    "in dev cluster, list namespaces and get a sample record from sample_set"
@@ -79,9 +79,9 @@ claude mcp add aerospike-dev --transport http --url http://localhost:8000/mcp
 For multi-cluster ACKO, register each cluster-manager separately:
 
 ```bash
-claude mcp add aerospike-prod-us --transport http \
-  --url https://acm.prod-us.example.com/mcp \
-  --header "Authorization: Bearer $ACM_MCP_TOKEN"
+claude mcp add --transport http aerospike-prod-us \
+  https://acm.prod-us.example.com/mcp \
+  -H "Authorization: Bearer $ACM_MCP_TOKEN"
 ```
 
 Tools are addressable as `mcp__aerospike-<name>__<tool>` (e.g. `mcp__aerospike-prod-us__get_record`). Agents pick the right prefix from the user's wording ("in prod-us, …" → `aerospike-prod-us`).
