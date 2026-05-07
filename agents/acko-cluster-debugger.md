@@ -45,8 +45,19 @@ Execute these steps in order. Stop and report findings as soon as you identify t
 
 **Data-plane discovery via MCP** (preferred — no shell needed). The user must have an active connection profile registered with ACM (created via the cluster-manager UI or the `create_connection` MCP tool).
 
+If the user has not specified a `conn_id`, list available profiles first:
+
 ```
-# Identify nodes, namespaces, sets via MCP
+# 1. Find an existing connection profile to drive the diagnosis
+mcp__aerospike-{prefix}__list_connections()
+# 2. If the list is empty, ask the user to create one before continuing,
+#    or create one inline with their input (mutation — confirm first):
+#    mcp__aerospike-{prefix}__create_connection(name="<...>", hosts=["<...>"], port=3000)
+```
+
+Then run discovery against the selected `conn_id`:
+
+```
 mcp__aerospike-{prefix}__list_namespaces(conn_id="<conn>")
 mcp__aerospike-{prefix}__get_nodes(conn_id="<conn>")
 mcp__aerospike-{prefix}__execute_info(conn_id="<conn>", command="statistics")
@@ -122,7 +133,20 @@ mcp__aerospike-{prefix}__execute_info(conn_id="<conn>", command="statistics")
 mcp__aerospike-{prefix}__execute_info(conn_id="<conn>", command="namespace/<ns-name>")
 # Sample-record sanity check
 mcp__aerospike-{prefix}__query(conn_id="<conn>", namespace="<ns-name>", set_name="<set>", max_records=5)
+# Filtered probe — predicate uses flat fields (predicate_bin / predicate_operator
+# / predicate_value / predicate_value2). Useful for narrowing in on records that
+# match a suspected fault signal, e.g. records past a TTL boundary.
+mcp__aerospike-{prefix}__query(
+    conn_id="<conn>",
+    namespace="<ns-name>",
+    set_name="<set>",
+    predicate_bin="age", predicate_operator="between",
+    predicate_value=18, predicate_value2=99,
+    max_records=20,
+)
 ```
+
+When `query` returns `truncated: true`, the result set was capped by `max_records` (or the server-side ceiling). For diagnosis this usually means "there are more matching records than you asked to see"; either tighten the predicate or raise `max_records` for the next call. Don't silently report the partial set as the whole picture.
 
 `kubectl exec` fallback (only if MCP path is unavailable):
 

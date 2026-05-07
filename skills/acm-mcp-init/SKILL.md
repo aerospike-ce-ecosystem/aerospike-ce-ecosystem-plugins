@@ -18,11 +18,11 @@ This skill works in three modes: **register**, **list**, **remove**. Pick the us
 Ask the user how many endpoints to register and gather connection details for each. Use `AskUserQuestion` for the count if it is not in the request:
 
 ```
-question: "ACM endpoint를 몇 개 등록할까요?"
+question: "How many ACM endpoints to register?"
 options:
-  - "1 (로컬 dev only)"
+  - "1 (local dev only)"
   - "2 (dev + prod)"
-  - "3 이상 (multi-cluster ACKO)"
+  - "3 or more (multi-cluster ACKO)"
 ```
 
 For each endpoint collect three values, one at a time:
@@ -33,22 +33,41 @@ For each endpoint collect three values, one at a time:
 
 Reject names that conflict with `aerospike-*` already registered (run `claude mcp list` to check before adding). If a name collision is detected, propose `<name>-2` or ask the user for a different name.
 
+### Step 1.5 — Auth-mode sanity check (server-side)
+
+Before driving the probe in Step 2, remind the user about the ACM server-side rule:
+
+> ACM refuses to start with `ACM_MCP_ENABLED=true` on a non-localhost bind interface unless EITHER OIDC is enabled (`OIDC_ENABLED=true` + issuer URL) OR a shared-secret bearer token is configured (`ACM_MCP_TOKEN=...`). Operators who really want anonymous access on a sealed network must opt in via `ACM_MCP_ALLOW_ANONYMOUS=true`.
+
+If the user reports that "the ACM container won't start" after enabling the flag, this is the most common cause — guide them to set `ACM_MCP_TOKEN` (and re-deploy) before retrying registration.
+
 ### Step 2 — Probe each endpoint
 
-Before registering, verify the endpoint is reachable:
+A streamable-HTTP MCP server does not respond meaningfully to a naked `GET /mcp` (you'll see 307/401/405 depending on auth and SDK version), so the probe must be an actual `initialize` POST. This validates both reachability AND the bearer token in one round-trip.
 
 ```bash
-# 200/405/406 means a streamable-http MCP responded; 404 means wrong URL.
-curl -fsSL -o /dev/null -w "%{http_code}\n" "$URL" || echo "unreachable"
+PROBE_AUTH=()
+[ -n "$TOKEN" ] && PROBE_AUTH=(-H "Authorization: Bearer $TOKEN")
+
+INIT_BODY='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"acm-mcp-init","version":"0"}}}'
+
+CODE=$(curl -sS -L -o /tmp/acm-init.txt -w "%{http_code}\n" \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  "${PROBE_AUTH[@]}" \
+  -d "$INIT_BODY" \
+  "$URL")
+
+case "$CODE" in
+  200) echo "OK: $(grep -o '\"name\":\"[^\"]*\"' /tmp/acm-init.txt | head -1)" ;;
+  401) echo "AUTH-FAIL: bearer token rejected (or none supplied while ACM_MCP_TOKEN is set)" ;;
+  404) echo "WRONG-URL: confirm the path includes /mcp and ACM_MCP_ENABLED=true" ;;
+  *)   echo "UNEXPECTED: HTTP $CODE — see /tmp/acm-init.txt" ;;
+esac
 ```
 
-If the probe fails, surface the URL and the HTTP code (or connection error) and ask the user whether to skip or fix the URL. Do not register an unreachable endpoint by default.
-
-If a token was provided, also verify it works:
-
-```bash
-curl -fsSL -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $TOKEN" "$URL"
-```
+The `200` branch parses out the server name from the `serverInfo` payload (expected to be `aerospike-cluster-manager`) so the user gets a positive confirmation rather than a silent green check. On `401`, prompt the user to either supply a token or fix an existing one before continuing — do not register an endpoint that can't authenticate.
 
 ### Step 3 — Register via `claude mcp add`
 
@@ -124,7 +143,12 @@ Mention this dance to the user before doing it so the audit trail is clear.
 
 ## Multi-cluster ACKO note
 
-If the user is running multiple `helm install acko` deployments — one per K8s cluster — each Helm release typically also runs its own cluster-manager instance with its own ingress URL. Register each separately:
+If the user is running multiple `helm install acko` deployments — one per K8s cluster — they typically have one of two patterns:
+
+1. **Bundled per-K8s** (default of the ACKO chart): each Helm release ships its own cluster-manager pod (`ui.api.enabled=true`). Each cluster-manager instance gets its own ingress URL → register each separately.
+2. **Federated single instance** (custom): one cluster-manager process holds multiple kubeconfig contexts and fans out internally. Register only that one cluster-manager — context selection happens inside ACM, not at the MCP boundary.
+
+For pattern 1 the registrations look like:
 
 ```
 aerospike-dev          → http://localhost:8000/mcp                  (local podman)
@@ -134,8 +158,6 @@ aerospike-prod-eu      → https://acm.prod-eu.example.com/mcp        (prod EU)
 ```
 
 The cluster-debugger agent then disambiguates from the user's wording — "in prod-us, …" routes to `mcp__aerospike-prod-us__*`.
-
-For deployments where one cluster-manager fans out to many K8s clusters via kubeconfig contexts, register only that one cluster-manager — context selection happens inside ACM, not at the MCP boundary.
 
 ---
 

@@ -65,6 +65,8 @@ claude plugin list
 
 This plugin uses the [aerospike-cluster-manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager) MCP server (21 Voyager-parity tools at `/mcp`) for live cluster access. Endpoints are registered per cluster-manager instance — register one entry per ACKO Helm release if you operate multiple clusters.
 
+The plugin ships an **empty `.mcp.json`** by design: nothing auto-registers on install. Onboarding goes through the `acm-mcp-init` skill so the user explicitly chooses which URLs and tokens to wire up. This keeps the install surface minimal and avoids surprising users with a broken `localhost:8000` entry on machines that don't run ACM.
+
 ```bash
 # 1. Start ACM somewhere reachable
 ACM_MCP_ENABLED=true uv run uvicorn aerospike_cluster_manager_api.main:app --reload
