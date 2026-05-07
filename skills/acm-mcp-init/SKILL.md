@@ -5,7 +5,7 @@ description: "Register one or many Aerospike Cluster Manager (ACM) MCP endpoints
 
 # ACM MCP Setup
 
-ACM exposes 21 Voyager-parity tools (records, query, asinfo, connections) at `/mcp` on its FastAPI port. Each registered endpoint becomes addressable as `mcp__aerospike-<name>__<tool>`.
+ACM exposes 21 MCP tools (records, query, asinfo, connections) at `/mcp` on its FastAPI port. Each registered endpoint becomes addressable as `mcp__aerospike-<name>__<tool>`.
 
 For each endpoint collect: **name** (becomes the prefix — e.g. `dev`, `prod-us`), **url** (e.g. `http://localhost:8000/mcp`), **token** (optional bearer, can be empty when OIDC-only or anonymous-on-localhost).
 
