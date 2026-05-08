@@ -182,6 +182,15 @@ Check for:
 - Namespace stop-writes (near capacity)
 - Connection issues (`proto-fd-max` reached)
 
+#### If Phase = `ConfigDegraded`
+
+```bash
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.conditions[?(@.type=="DynamicConfigDegraded")]}' | jq
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods[*].dynamicConfigChanges}' | jq
+```
+
+Meaning: a 2PC dynamic config update failed AND the LIFO rollback also failed. Different pods now hold different runtime configs. The operator will attempt a cold restart on the next reconcile to converge to spec. **Do not** manually flip `enableDynamicConfigUpdate` or re-apply the change — let the cold restart run. If the cold-restart loop continues, the underlying value is invalid for the deployed hardware shape — revert spec to the last known-good value and re-apply. Recovery is complete when `phase=Completed` and the `DynamicConfigDegraded` condition clears.
+
 ### Step 3 — Check pod-level issues
 
 For any pods not in `Running` state:

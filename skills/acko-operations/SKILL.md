@@ -145,7 +145,7 @@ Top-level statuses:
 
 ### When apply AND rollback both fail
 
-You will see `phase = ConfigDegraded`. Do NOT try to "fix" it by toggling `enableDynamicConfigUpdate` — the operator will cold-restart the pods on the next reconcile to reach a consistent state. See §14 troubleshooting for recovery.
+You will see `phase = ConfigDegraded`. Do NOT try to "fix" it by toggling `enableDynamicConfigUpdate` — the operator will cold-restart the pods on the next reconcile to reach a consistent state. See the `acko-debugging` skill for the full recovery flow.
 
 ### Static Config Change (Requires Restart)
 
@@ -278,7 +278,7 @@ kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"paused":null}}'
 
 **Phase**: `Paused` -> `InProgress` -> `Completed`
 
-On resume, the operator clears stale `status.failedReconcileCount` and `status.lastReconcileError`. This is the recommended way to clear a stuck circuit breaker after fixing a permanent error (see §14).
+On resume, the operator clears stale `status.failedReconcileCount` and `status.lastReconcileError`. This is the recommended way to clear a stuck circuit breaker after fixing a permanent error (see the `acko-debugging` skill).
 
 ### Pause/Resume Metrics
 
@@ -373,178 +373,11 @@ Detail: `./reference/operations.md` (Section 7: Readiness Gate)
 
 ---
 
-## 14. Troubleshooting Decision Tree
+## 14. Troubleshooting
 
-Use this decision tree to diagnose cluster issues systematically.
+For systematic outage diagnosis (`phase=Error`, stuck migrations, `CrashLoopBackOff`, `CircuitBreakerActive`, `ConfigDegraded`, `ReadinessGateBlocking`, webhook rejection, `dynamicConfigStatus=Failed`, paused reconciliation), use the dedicated **`acko-debugging` skill** — it carries the 6-step procedure, CE 8.1 pitfalls, and remediation matrix that used to live here.
 
-### Phase = Error
-
-```
-1. Get the error message:
-   kubectl get asc <name> -n <ns> -o jsonpath='{.status.lastReconcileError}'
-
-2. Check events for details:
-   kubectl get events -n <ns> --field-selector involvedObject.name=<name> --sort-by='.lastTimestamp'
-
-3. Common causes:
-   - Invalid aerospikeConfig (parse error) -> Fix config and re-apply
-   - Image pull failure -> Check image name, registry access, imagePullSecrets
-   - Resource quota exceeded -> Increase quota or reduce resource requests
-   - Webhook rejection -> Check CE constraints (see acko-deploy skill)
-
-4. After fixing: the operator auto-retries reconciliation.
-```
-
-### Phase = WaitingForMigration
-
-```
-1. This is NORMAL during scale-down. The operator waits for data migration to finish.
-
-2. Check migration progress:
-   kubectl exec -n <ns> <pod> -c aerospike-server -- asinfo -v 'statistics' | tr ';' '\n' | grep migrate
-
-3. If migrate_partitions_remaining = 0, migration is complete.
-
-4. The operator auto-proceeds after migration completes. No manual action needed.
-```
-
-### Phase = InProgress (Stuck for > 5 Minutes)
-
-```
-1. Check for pending PVCs:
-   kubectl get pvc -n <ns> -l aerospike.io/cr-name=<name>
-   -> If PVC is Pending: check StorageClass, available capacity
-
-2. Check for image pull issues:
-   kubectl describe pod <pod> -n <ns> | grep -A5 "Events:"
-
-3. Check for scheduling failures:
-   kubectl get pods -n <ns> -l aerospike.io/cr-name=<name> -o wide
-   kubectl describe pod <pending-pod> -n <ns>
-
-4. Check operator logs:
-   kubectl -n aerospike-operator logs -l control-plane=controller-manager --tail=200
-```
-
-### Pod CrashLoopBackOff
-
-```
-1. Check the Aerospike server logs from the crashed container:
-   kubectl -n <ns> logs <pod> -c aerospike-server --previous
-
-2. Common causes:
-   - Config parse error (e.g., using removed 'info' port block in 8.1)
-   - data-size too small (minimum 512 MiB)
-   - nsup-period=0 with non-zero default-ttl
-   - Memory limit too low for configured data-size
-
-3. Fix the aerospikeConfig in the CR and re-apply.
-```
-
-### CircuitBreakerActive Event
-
-```
-1. Check failure count and breaker metric:
-   kubectl get asc <name> -n <ns> -o jsonpath='{.status.failedReconcileCount}'
-   # Promql: acko_circuit_breaker_active{cluster="<name>"} == 1
-
-2. Check the last error:
-   kubectl get asc <name> -n <ns> -o jsonpath='{.status.lastReconcileError}'
-
-3. Determine if the error is permanent or transient:
-   kubectl get asc <name> -n <ns> -o jsonpath='{.status.conditions[?(@.type=="ReconcileHealthy")]}' | jq
-
-   - status=False, reason=PermanentError -> validation/configgen/secret error.
-     The operator does NOT auto-retry. failedReconcileCount is pinned at max
-     (no exponential backoff to wait through). You MUST take action:
-       a) Fix the root cause (correct the spec, create the missing Secret, etc.)
-       b) Then either edit the spec to retrigger reconcile, OR toggle pause
-          to clear stale failedReconcileCount and lastReconcileError:
-            kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"paused":true}}'
-            kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"paused":null}}'
-
-   - status=True (transient) -> operator will retry with backoff.
-     Just fix the underlying transient cause (image pull, capacity, etc.).
-
-4. After a successful reconciliation, CircuitBreakerReset event is emitted and
-   acko_circuit_breaker_active drops to 0.
-```
-
-### Phase = ConfigDegraded (NEW, April 2026)
-
-```
-1. Confirm the condition:
-   kubectl get asc <name> -n <ns> -o jsonpath='{.status.conditions[?(@.type=="DynamicConfigDegraded")]}' | jq
-
-2. Inspect per-pod, per-path detail:
-   kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods[*].dynamicConfigChanges}' | jq
-
-3. Meaning: a 2PC dynamic config update failed AND the LIFO rollback also failed.
-   Different pods now have different runtime configs. The operator will attempt
-   a cold restart on the next reconcile to converge to spec.
-
-4. Action: do NOT manually flip enableDynamicConfigUpdate or re-apply the change.
-   Let the cold restart run. If the cold restart loop continues, the underlying
-   config value is invalid for some hardware shape -- revert the spec to the
-   previous known-good value and re-apply.
-
-5. Recovery is complete when phase=Completed and DynamicConfigDegraded is no
-   longer present in conditions.
-```
-
-### ReconciliationPaused = True (Operator Inaction)
-
-```
-1. The operator is intentionally not reconciling because spec.paused=true.
-   This is a normal state, not an error.
-
-2. Resume:
-   kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"paused":null}}'
-
-3. Resume also clears stale failedReconcileCount and lastReconcileError --
-   useful for unsticking a circuit breaker after fixing a permanent error.
-```
-
-### Webhook Rejects CR (Apply Error)
-
-```
-1. Read the error message from kubectl apply output.
-
-2. Common CE constraint violations:
-   - size > 8
-   - namespaces > 2
-   - Enterprise image (contains 'enterprise', 'ee-', or 'ent-')
-   - xdr or tls section present
-   - heartbeat.mode != mesh
-   - Missing admin user with sys-admin + user-admin roles
-
-3. See reference/validation-rules.md for the complete list of validation errors and warnings (count grows over releases — see file header).
-```
-
-### dynamicConfigStatus = Failed
-
-```
-1. Check which pods failed:
-   kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods}' | jq '.[].dynamicConfigStatus'
-
-2. The parameter you changed is not dynamically changeable.
-
-3. Fix: set enableDynamicConfigUpdate to false to force a rolling restart:
-   kubectl patch asc <name> -n <ns> --type=merge \
-     -p '{"spec":{"enableDynamicConfigUpdate":false}}'
-```
-
-### ReadinessGateBlocking Event
-
-```
-1. Check pod conditions:
-   kubectl get pod <pod> -o jsonpath='{.status.conditions}' | jq '.[]'
-
-2. The readiness gate acko.io/aerospike-ready is not satisfied.
-
-3. Check if Aerospike is actually running and healthy inside the pod:
-   kubectl exec -n <ns> <pod> -c aerospike-server -- asinfo -v status
-```
+`reference/troubleshooting.md` and `reference/validation-rules.md` (kept in this skill) remain the canonical symptom-→command and webhook-error catalogs that `acko-debugging` cross-links into.
 
 ---
 
