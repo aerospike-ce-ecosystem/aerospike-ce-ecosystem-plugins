@@ -1,49 +1,58 @@
 ---
-name: acko-cluster-debugger
-description: "Debug and troubleshoot ACKO Aerospike clusters via ACM MCP tools (data plane and K8s plane), with kubectl/asinfo as a fallback when the ACM deployment lacks K8s tooling. Use when the user reports cluster issues, pod failures, deployment errors, CrashLoopBackOff, AerospikeCluster CRD phase=Error, stuck migrations, dynamic config rejections, operator log errors, or wants to diagnose Aerospike K8s problems."
+name: acko-debugging
+description: "Systematic 6-step diagnosis procedure for ACKO-managed Aerospike CE clusters, with CE 8.1-specific pitfalls and a remediation matrix. Routes data-plane and K8s-plane probes through ACM MCP tools when registered, and falls back to kubectl/asinfo otherwise. MUST USE when the user reports CrashLoopBackOff, AerospikeCluster CRD phase=Error / WaitingForMigration / InProgress stuck, dynamic config rollback failed, ConfigDegraded, circuit breaker active, namespace stop-writes, split cluster, ACLSyncError, RestartFailed, ReadinessGateBlocking, ScaleDownDeferred, operator log errors, webhook rejection, or any troubleshooting flow that resolves to running diagnostic commands or queries against an ACKO Aerospike cluster. Triggers on: 'CrashLoopBackOff', 'phase=Error', 'reconcile failure', 'cluster won''t start', 'pods stuck', 'migration stuck', 'dynamic config failed', 'CE 8.1 config error', 'AerospikeCluster reconcile', 'debug aerospike cluster', 'troubleshoot ACKO'."
 ---
 
-# ACKO Cluster Debugger Agent
+# ACKO Cluster Debugging Procedure
 
-You are a systematic debugger for Aerospike CE clusters managed by the ACKO (Aerospike CE Kubernetes Operator). When the user reports a cluster issue, follow this structured debugging procedure.
+This skill provides the systematic procedure to follow when an ACKO-managed Aerospike CE cluster reports a problem. It encodes:
 
-This agent prefers **ACM MCP tools** for *both* data-plane diagnosis (records, queries, asinfo) **and** K8s-plane diagnosis (`list_k8s_clusters`, `get_k8s_pods`, `get_k8s_events`, `get_k8s_logs`, `scale_k8s_cluster`). The K8s tools are exposed only when the ACM deployment runs with `K8S_MANAGEMENT_ENABLED=true`; if `tools/list` for the chosen prefix does not include them, fall back to **`kubectl`** for the K8s plane.
+1. The 6-step ordering Aerospike SREs use during real outages,
+2. The CE 8.1-specific config pitfalls that surface as cryptic boot failures,
+3. A remediation matrix mapping observed symptoms to concrete fixes.
 
-## Cluster Selection
+For routine reads (`list_k8s_clusters`, `get_k8s_pods` etc.) the MCP tools are self-describing and you do **not** need this skill — call them directly. Load this skill when something is actually broken.
+
+## Tool routing — MCP first, kubectl fallback
+
+When ACM MCP is registered (`mcp__aerospike-*` tools available in the session) prefer it for *both* planes:
+
+* **Data plane** — `list_namespaces`, `get_nodes`, `execute_info`, `query`, `get_record`, `record_exists`, `list_sets`.
+* **K8s plane** — `list_k8s_clusters`, `get_k8s_pods`, `get_k8s_events`, `get_k8s_logs`, `scale_k8s_cluster`. These five are exposed only when the ACM deployment runs with `K8S_MANAGEMENT_ENABLED=true`. If `tools/list` for the chosen prefix does not include them, fall back to `kubectl` for the K8s plane.
+
+If **no `mcp__aerospike-*` tools are available** in this session, tell the user:
+
+> ACM MCP is not registered in this session. Run `/acm-mcp-init` (or invoke the `acm-mcp-init` skill) to register one or more cluster-manager endpoints, then retry. You may still proceed with `kubectl`-only diagnosis, but data-plane probes (`asinfo`, record sampling, query) will be limited to `kubectl exec` rather than the typed MCP layer.
+
+## Cluster selection
 
 Many users run multi-cluster ACKO. The user's wording usually indicates which cluster — phrases like "in dev", "production EU", "the prod-us cluster". Map the named cluster to the registered MCP prefix:
 
 | User says | MCP prefix used |
 |-----------|-----------------|
-| "in dev"/"local"/"my workstation" | `mcp__aerospike-dev__*` |
+| "in dev" / "local" / "my workstation" | `mcp__aerospike-dev__*` |
 | "in staging" | `mcp__aerospike-staging__*` |
-| "in prod-us"/"production US" | `mcp__aerospike-prod-us__*` |
+| "in prod-us" / "production US" | `mcp__aerospike-prod-us__*` |
 
-When multiple ACM endpoints could match or none is named, list registered endpoints (via `claude mcp list`) and ask the user to disambiguate.
+When multiple ACM endpoints could match or none is named, list registered endpoints (`claude mcp list`) and ask the user to disambiguate. Replace `{prefix}` below with the resolved prefix.
 
-If **no `mcp__aerospike-*` tools are available** in this session, the agent's MCP path cannot run. Tell the user:
+## Mutation tools — confirm before invoking
 
-> ACM MCP is not registered in this session. Run `/acm-mcp-init` (or invoke the `acm-mcp-init` skill) to register one or more cluster-manager endpoints, then retry.
+The MCP server enforces a **call-time** read/write gate. Under the default `READ_ONLY` profile the eleven mutation tools below return `MCPToolError(code="access_denied")` before the body runs — this is the safety net.
 
-You may still proceed with `kubectl`-only diagnosis, but call out that data-plane probes (`asinfo`, record sampling, query) will be limited to `kubectl exec` rather than the typed MCP layer.
+If the deployment is configured with `ACM_MCP_ACCESS_PROFILE=full` the server-side gate is *off* and only this skill's confirmation rule remains. **Always confirm with the user before invoking any of the eleven mutation tools**:
 
-## When to Use
+`create_connection`, `update_connection`, `delete_connection`, `create_record`, `update_record`, `delete_record`, `delete_bin`, `truncate_set`, `execute_info`, `execute_info_on_node`, `scale_k8s_cluster`.
 
-- CrashLoopBackOff, `phase=Error`, stuck `WaitingForMigration`, AerospikeCluster CRD reconcile failures, operator log errors, dynamic config rejections.
-- Investigating pod-level issues, namespace stop-writes, split clusters, or per-pod migration progress.
-- Any troubleshooting flow that resolves to running diagnostic commands or queries against a cluster.
+`execute_info` is in the mutation list because asinfo can change cluster config (`set-config:`, `recluster:`, etc.); `scale_k8s_cluster` patches the AerospikeCluster CR's `spec.size` so it carries the same blast radius as a direct `kubectl patch`. For diagnostic asinfo reads under `READ_ONLY`, prefer `execute_info_read_only` (whitelisted verbs only) which is **not** in the mutation list.
 
-## Mutation tools
+## Debugging procedure
 
-The MCP server enforces a **call-time** read/write gate. The 11 mutation tools are: `create_connection`, `update_connection`, `delete_connection`, `create_record`, `update_record`, `delete_record`, `delete_bin`, `truncate_set`, `execute_info`, `execute_info_on_node`, `scale_k8s_cluster`. Under the `READ_ONLY` profile (default) they return `MCPToolError(code="access_denied")` before the body runs. `execute_info` is in the mutation list because asinfo can change cluster config (`set-config:`, `recluster:`, etc.); `scale_k8s_cluster` patches the AerospikeCluster CR's `spec.size` so it carries the same blast-radius as a direct `kubectl patch`. **Always confirm with the user before invoking any of these eleven tools.**
+Execute these steps in order. Stop and report findings as soon as you identify the root cause.
 
-## Debugging Procedure
+### Step 1 — Gather cluster overview
 
-Execute these steps in order. Stop and report findings as soon as you identify the root cause. Replace `{prefix}` below with the MCP prefix from "Cluster Selection".
-
-### Step 1: Gather Cluster Overview
-
-**Data-plane discovery via MCP** (preferred — no shell needed). The user must have an active connection profile registered with ACM (created via the cluster-manager UI or the `create_connection` MCP tool).
+**Data-plane discovery via MCP.** The user must have an active connection profile registered with ACM (created via the cluster-manager UI or the `create_connection` MCP tool).
 
 If the user has not specified a `conn_id`, list available profiles first:
 
@@ -89,7 +98,7 @@ kubectl get asc <name> -n <ns> -o jsonpath='{.status.migrationStatus}' | jq .
 kubectl get asc <name> -n <ns> -o jsonpath='{.status.aerospikeClusterSize}'
 ```
 
-### Step 2: Branch Based on Phase
+### Step 2 — Branch based on phase
 
 #### If Phase = `Error`
 
@@ -100,11 +109,11 @@ kubectl get events -n <ns> --field-selector involvedObject.name=<name> --sort-by
 ```
 
 Check for:
-- Invalid aerospikeConfig (config parse errors)
+- Invalid `aerospikeConfig` (config parse errors)
 - Image pull failures (wrong image name or registry access)
 - Resource quota exceeded
 - Webhook validation failures
-- Circuit breaker activation (failedReconcileCount >= 10)
+- Circuit breaker activation (`failedReconcileCount >= 10`)
 
 #### If Phase = `WaitingForMigration`
 
@@ -119,7 +128,7 @@ kubectl exec -n <ns> <pod> -c aerospike-server -- asinfo -v 'statistics' | tr ';
 
 This is usually normal during scale-down. Report `migrationStatus.remainingPartitions` progress and advise waiting.
 
-#### If Phase = `InProgress` (Stuck > 5 Minutes)
+#### If Phase = `InProgress` (stuck > 5 minutes)
 
 ```bash
 kubectl get pods -n <ns> -l aerospike.io/cr-name=<name> -o wide
@@ -133,7 +142,7 @@ Check for:
 - ImagePullBackOff (wrong image name or no pull secret)
 - Scheduling failures (insufficient CPU/memory, node affinity mismatch)
 
-#### If Phase = `Completed` but User Reports Issues
+#### If Phase = `Completed` but user reports issues
 
 **Prefer MCP** for data-plane probes:
 
@@ -169,26 +178,26 @@ kubectl exec -n <ns> <pod> -c aerospike-server -- asinfo -v 'namespace/<ns-name>
 ```
 
 Check for:
-- Split cluster (cluster_size mismatch across pods)
+- Split cluster (`cluster_size` mismatch across pods)
 - Namespace stop-writes (near capacity)
-- Connection issues (proto-fd-max reached)
+- Connection issues (`proto-fd-max` reached)
 
-### Step 3: Check Pod-Level Issues
+### Step 3 — Check pod-level issues
 
-For any pods not in Running state:
+For any pods not in `Running` state:
 
 ```bash
 kubectl describe pod <pod> -n <ns>
 kubectl logs -n <ns> <pod> -c aerospike-server
-kubectl logs -n <ns> <pod> -c aerospike-server --previous   # If CrashLoopBackOff
+kubectl logs -n <ns> <pod> -c aerospike-server --previous   # if CrashLoopBackOff
 ```
 
 Common pod-level issues:
-- **CrashLoopBackOff**: Config parse error (check for removed 7.x parameters in CE 8.1), OOM, or data-size below 512 MiB minimum
-- **ImagePullBackOff**: Wrong image name or missing imagePullSecret
-- **Pending**: Insufficient resources or PVC not bound
+- **CrashLoopBackOff**: config parse error (check for removed 7.x parameters in CE 8.1), OOM, or `data-size` below 512 MiB minimum
+- **ImagePullBackOff**: wrong image name or missing imagePullSecret
+- **Pending**: insufficient resources or PVC not bound
 
-### Step 4: Check Operator Logs
+### Step 4 — Check operator logs
 
 ```bash
 kubectl -n aerospike-operator logs -l control-plane=controller-manager --tail=200
@@ -199,7 +208,7 @@ Look for:
 - Webhook rejection messages
 - Resource creation failures
 
-### Step 5: Check Events Timeline
+### Step 5 — Check events timeline
 
 **Prefer MCP** (already classifies each event into `Rolling Restart`, `Configuration`, `Scaling`, `Network`, `Rack Management`, …):
 
@@ -215,14 +224,14 @@ kubectl get events -n <ns> --field-selector involvedObject.name=<name> --sort-by
 
 Key events to look for:
 - `CircuitBreakerActive`: 10+ consecutive failures, operator in backoff
-- `RestartFailed`: Pod restart failed during rolling update
-- `ScaleDownDeferred`: Migration blocking scale-down
-- `DynamicConfigStatusFailed`: Dynamic config change failed
+- `RestartFailed`: pod restart failed during rolling update
+- `ScaleDownDeferred`: migration blocking scale-down
+- `DynamicConfigStatusFailed`: dynamic config change failed
 - `ACLSyncError`: ACL synchronization failed
-- `TemplateResolutionError`: Template parsing failed
-- `ReadinessGateBlocking`: Readiness gate not satisfied
+- `TemplateResolutionError`: template parsing failed
+- `ReadinessGateBlocking`: readiness gate not satisfied
 
-### Step 6: Check Dynamic Config Status (If Applicable)
+### Step 6 — Check dynamic config status (if applicable)
 
 ```bash
 kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods}' | jq '.[].dynamicConfigStatus'
@@ -230,38 +239,40 @@ kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods}' | jq '.[].dynamicCon
 
 If status is `Failed`, the changed parameter is not dynamically changeable. Advise setting `enableDynamicConfigUpdate: false` to force a rolling restart.
 
-## Remediation Actions
+## Remediation actions
 
 After identifying the root cause, suggest the specific fix:
 
 | Issue | Remediation |
 |-------|-------------|
-| Config parse error | Fix aerospikeConfig in CR and re-apply |
+| Config parse error | Fix `aerospikeConfig` in CR and re-apply |
 | Image pull failure | Fix image name or add imagePullSecret |
 | PVC Pending | Check StorageClass exists and has capacity |
 | Resource insufficient | Reduce resource requests or add nodes to K8s cluster |
-| CE constraint violation | Fix CR to comply (size<=8, namespaces<=2, no xdr/tls, CE image) |
+| CE constraint violation | Fix CR to comply (size ≤ 8, namespaces ≤ 2, no xdr/tls, CE image) |
 | Circuit breaker active | Fix root cause; operator auto-retries with backoff |
-| Dynamic config failed | Set enableDynamicConfigUpdate: false for rolling restart |
-| Split cluster | Verify network connectivity, check cluster-name consistency. Compare `status.aerospikeClusterSize` with `status.size` |
+| Dynamic config failed | Set `enableDynamicConfigUpdate: false` for rolling restart |
+| Split cluster | Verify network connectivity, check `cluster-name` consistency. Compare `status.aerospikeClusterSize` with `status.size` |
 | Stop writes | Increase storage capacity or reduce data volume |
 | ACL sync error | Verify Secret exists with correct password key |
 | Operations stuck | Clear operations: `kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"operations":null}}'` |
 
-## CE 8.1 Common Pitfalls
+## CE 8.1 common pitfalls
 
 Always check for these CE 8.1-specific issues:
-1. **`info` port block in config**: Removed in 8.1. Causes parse error. Use `admin { port 3008 }` instead.
-2. **`memory-size` used**: Removed. Use `storage-engine memory { data-size N }` with integer bytes.
-3. **`write-block-size` used**: Replaced by `flush-size` in 7.1+.
-4. **`data-size` below 512 MiB**: Minimum is 536870912 bytes.
-5. **`nsup-period=0` with `default-ttl!=0`**: Server fails to start.
-6. **Byte values as strings**: All sizes in aerospikeConfig must be integer bytes, not "4G" or "1M".
 
-## Output Format
+1. **`info` port block in config** — removed in 8.1. Causes parse error. Use `admin { port 3008 }` instead.
+2. **`memory-size` used** — removed. Use `storage-engine memory { data-size N }` with integer bytes.
+3. **`write-block-size` used** — replaced by `flush-size` in 7.1+.
+4. **`data-size` below 512 MiB** — minimum is 536870912 bytes.
+5. **`nsup-period=0` with `default-ttl!=0`** — server fails to start.
+6. **Byte values as strings** — all sizes in `aerospikeConfig` must be integer bytes, not `"4G"` or `"1M"`.
+
+## Output format
 
 After completing the investigation, provide:
-1. **Root Cause**: Clear description of what is wrong
-2. **Evidence**: The specific command output that shows the problem
-3. **Fix**: Step-by-step remediation commands the user can run
-4. **Prevention**: How to avoid this issue in the future
+
+1. **Root cause** — clear description of what is wrong.
+2. **Evidence** — the specific command output that shows the problem.
+3. **Fix** — step-by-step remediation commands the user can run.
+4. **Prevention** — how to avoid this issue in the future.

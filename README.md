@@ -53,17 +53,12 @@ claude plugin list
 
 | Skill | Trigger | Description |
 |-------|---------|-------------|
-| **acm-mcp-init** | "register ACM MCP", "/acm-mcp-init" | Register one or many [aerospike-cluster-manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager) MCP endpoints with Claude Code so other skills/agents can read and operate live clusters. Multi-cluster ACKO friendly. |
-
-### Agents
-
-| Agent | Description |
-|-------|-------------|
-| **acko-cluster-debugger** | Systematic cluster debugging. Uses ACM MCP tools (`mcp__aerospike-{prefix}__list_namespaces`, `__execute_info`, `__query`, `__get_record`) for data-plane diagnosis; falls back to `kubectl`/`asinfo` for K8s-plane (pods, events, logs). Phase 2 will replace the K8s side with MCP tools too. |
+| **acm-mcp-init** | "register ACM MCP", "/acm-mcp-init" | Register one or many [aerospike-cluster-manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager) MCP endpoints with Claude Code so other skills can read and operate live clusters. Multi-cluster ACKO friendly. |
+| **acko-debugging** | "CrashLoopBackOff", "phase=Error", "reconcile failure", "migration stuck" | Systematic 6-step diagnosis procedure for ACKO clusters with CE 8.1 pitfalls and a remediation matrix. Routes both data-plane and K8s-plane probes through ACM MCP when registered (`list_namespaces`, `execute_info`, `query`, `list_k8s_clusters`, `get_k8s_pods`, `get_k8s_events`, `get_k8s_logs`); falls back to `kubectl`/`asinfo` otherwise. |
 
 ## MCP integration
 
-This plugin uses the [aerospike-cluster-manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager) MCP server (21 tools at `/mcp`) for live cluster access. Endpoints are registered per cluster-manager instance — register one entry per ACKO Helm release if you operate multiple clusters.
+This plugin uses the [aerospike-cluster-manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager) MCP server (27 tools at `/mcp` — 22 data-plane + 5 K8s-plane) for live cluster access. Endpoints are registered per cluster-manager instance — register one entry per ACKO Helm release if you operate multiple clusters.
 
 The plugin ships an **empty `.mcp.json`** by design: nothing auto-registers on install. Onboarding goes through the `acm-mcp-init` skill so the user explicitly chooses which URLs and tokens to wire up. This keeps the install surface minimal and avoids surprising users with a broken `localhost:8000` entry on machines that don't run ACM.
 
