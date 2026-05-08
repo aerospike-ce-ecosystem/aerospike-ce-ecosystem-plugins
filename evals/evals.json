@@ -58,7 +58,7 @@
     {
       "id": 10,
       "prompt": "I have ACM MCP set up at aerospike-dev. Cluster prod is reporting CrashLoopBackOff on pods. Walk me through diagnosis using the MCP tools where available.",
-      "expected_output": "acko-cluster-debugger agent uses mcp__aerospike-dev__list_namespaces / __get_nodes / __execute_info for the data-plane portion of diagnosis, falls back to kubectl for pod/event/log inspection (Phase 2 will replace this with K8s MCP tools), never calls a mutation tool without explicit user confirmation",
+      "expected_output": "acko-cluster-debugger agent uses mcp__aerospike-dev__list_namespaces / __get_nodes / __execute_info for the data plane and mcp__aerospike-dev__list_k8s_clusters / __get_k8s_pods / __get_k8s_events / __get_k8s_logs for the K8s plane (the K8s MCP tools shipped in ACM PR #305/#313). Falls back to kubectl only when the ACM deployment was started without K8S_MANAGEMENT_ENABLED=true and the K8s prefix is missing from tools/list. Never calls any of the eleven mutation tools (gated by ACM's READ_ONLY profile, including scale_k8s_cluster) without explicit user confirmation",
       "files": []
     }
   ]
