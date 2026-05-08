@@ -103,45 +103,7 @@ Span name is `{OPERATION} {namespace}.{set}` (e.g. `PUT test.users`).
 
 ## FastAPI Integration
 
-Wire metrics + tracing into your app's lifespan so they boot and shut down with the server.
-
-```python
-from contextlib import asynccontextmanager
-
-import aerospike_py
-from aerospike_py import AsyncClient
-from fastapi import FastAPI
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Boot observability before opening the client so connect() spans are captured.
-    aerospike_py.start_metrics_server(port=9464)
-    aerospike_py.init_tracing()  # OTLP exporter via OTEL_EXPORTER_OTLP_ENDPOINT
-
-    client = AsyncClient({"hosts": [("aerospike", 3000)], "max_concurrent_operations": 64})
-    await client.connect()
-    app.state.aerospike = client
-
-    yield
-
-    await client.close()
-    aerospike_py.shutdown_tracing()
-    aerospike_py.stop_metrics_server()
-
-
-app = FastAPI(lifespan=lifespan)
-```
-
-The metrics server runs on its own daemon thread (separate port from your FastAPI server) — Prometheus scrapes `http://<pod>:9464/metrics`. If you must serve `/metrics` from the FastAPI port instead, expose your own route returning `aerospike_py.get_metrics()` and skip `start_metrics_server()`:
-
-```python
-from fastapi.responses import PlainTextResponse
-
-@app.get("/metrics")
-def metrics() -> PlainTextResponse:
-    return PlainTextResponse(aerospike_py.get_metrics(), media_type="text/plain; version=0.0.4")
-```
+For the full lifespan pattern wiring `start_metrics_server` / `init_tracing` / `AsyncClient` together (with the correct shutdown ordering and the alternative `/metrics` route via `aerospike_py.get_metrics()` instead of the dedicated port), see the `aerospike-py-fastapi` skill.
 
 ---
 

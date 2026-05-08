@@ -167,39 +167,17 @@ Webhook auto-settings and CRD field mapping: See acko-config-reference skill's `
 
 ## 6. Verification Commands
 
-Run these after deploying or modifying a cluster.
+CR-specific status fields worth knowing — everything else is a normal `kubectl get pods/events` / `kubectl exec asinfo` flow:
 
 ```bash
-# List all Aerospike clusters with their phase
-kubectl get asc -n aerospike
-
-# Check specific cluster phase
-kubectl get asc <name> -n aerospike -o jsonpath='{.status.phase}'
-
-# Check phase reason (useful when phase is Error or InProgress)
-kubectl get asc <name> -n aerospike -o jsonpath='{.status.phaseReason}'
-
-# Check all conditions
-kubectl get asc <name> -n aerospike -o jsonpath='{.status.conditions}' | jq .
-
-# Check pod status details
-kubectl get asc <name> -n aerospike -o jsonpath='{.status.pods}' | jq .
-
-# Check ready pod count
-kubectl get asc <name> -n aerospike -o jsonpath='{.status.size}'
-
-# Check cluster events (most recent last)
-kubectl get events -n aerospike --field-selector involvedObject.name=<name> --sort-by='.lastTimestamp'
-
-# Verify Aerospike service is responding
-kubectl exec -n aerospike <pod-name> -c aerospike-server -- asinfo -v status
-
-# Check cluster membership
-kubectl exec -n aerospike <pod-name> -c aerospike-server -- asinfo -v 'statistics' | tr ';' '\n' | grep cluster_size
-
-# Check namespace stats
-kubectl exec -n aerospike <pod-name> -c aerospike-server -- asinfo -v 'namespace/<namespace-name>'
+kubectl get asc -n <ns>                                                                    # all clusters with phase + ready/total
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.phase}'                                # current phase
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.phaseReason}'                          # why (when Error / InProgress)
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.conditions}' | jq .                    # ReconcileHealthy / DynamicConfigDegraded / etc.
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods}' | jq .                          # per-pod state (rack, dynamicConfigStatus, …)
 ```
+
+For systematic diagnosis when something is wrong, load the `acko-debugging` skill.
 
 ---
 

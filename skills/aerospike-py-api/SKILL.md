@@ -247,33 +247,7 @@ Detail: `./reference/observability.md`
 
 ## 12. FastAPI Integration
 
-```python
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, Depends
-from aerospike_py import AsyncClient
-import aerospike_py
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    client = AsyncClient({"hosts": [("127.0.0.1", 18710)], "max_concurrent_operations": 64})
-    aerospike_py.init_tracing(); await client.connect()
-    app.state.aerospike = client
-    yield
-    await client.close(); aerospike_py.shutdown_tracing()
-
-app = FastAPI(lifespan=lifespan)
-get_client = lambda r: r.app.state.aerospike
-
-@app.get("/records/{pk}")
-async def get_record(pk: str, client: AsyncClient = Depends(get_client)):
-    try:
-        return (await client.get(("test", "demo", pk))).bins
-    except aerospike_py.RecordNotFound:
-        from fastapi.responses import JSONResponse
-        return JSONResponse(status_code=404, content={"error": "not found"})
-```
-
-Detail: `./reference/client-config.md` | `./reference/types.md`
+For full FastAPI patterns (lifespan + Depends, exception → HTTP-status mapping including `BackpressureError → 503`, `client.ping()` readiness probe, batch endpoints, global handlers), use the dedicated **`aerospike-py-fastapi` skill**. It auto-triggers on FastAPI / REST API + Aerospike phrasing.
 
 ## 13. Policy Reference
 

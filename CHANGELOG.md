@@ -8,6 +8,15 @@ See [VERSIONING.md](./VERSIONING.md) for the compatibility matrix and deprecatio
 
 ## [Unreleased]
 
+### Changed
+
+- **`acko-cluster-debugger` agent → `acko-debugging` skill**: demoted to a skill so triggering happens via description match rather than explicit Task delegation. The 6-step procedure, CE 8.1 pitfalls, and remediation matrix are unchanged; routing through ACM MCP for both data-plane and K8s-plane (the K8s tools shipped in ACM PR #305/#313) is preserved. Subagent context isolation is the only capability lost — most diagnoses are single-shot anyway, and routine reads (`list_k8s_clusters`, `get_k8s_pods`, …) no longer have to spawn a subagent.
+
+### Fixed
+
+- **MCP tool count drift**: `acm-mcp-init` skill now states 27 tools (22 data-plane + 5 K8s-plane) instead of the stale 21.
+- **Mutation list completeness**: the demoted `acko-debugging` skill lists all 11 mutation tools, including the `scale_k8s_cluster` entry that was missing from the original 10-name list.
+
 ## [1.2.0] - 2026-05-04
 
 ### Added

@@ -39,37 +39,7 @@ Use `ping()` for **readiness**, not liveness:
 
 ### FastAPI readiness example
 
-```python
-from fastapi import FastAPI, Depends, Request
-from fastapi.responses import JSONResponse
-from aerospike_py import AsyncClient
-
-app = FastAPI()
-
-def get_client(request: Request) -> AsyncClient:
-    return request.app.state.aerospike
-
-@app.get("/health/ready")
-async def ready(client: AsyncClient = Depends(get_client)):
-    return {"status": "ok"} if await client.ping() else JSONResponse(503, {"status": "unhealthy"})
-
-@app.get("/health/live")
-async def live():
-    return {"status": "ok"}
-```
-
-K8s manifest snippet:
-
-```yaml
-readinessProbe:
-  httpGet: { path: /health/ready, port: 8080 }
-  periodSeconds: 5
-  failureThreshold: 3
-livenessProbe:
-  httpGet: { path: /health/live, port: 8080 }
-  periodSeconds: 10
-  failureThreshold: 3
-```
+For the `client.ping()`-driven `/health/ready` route (with `Depends(get_client)` and the `JSONResponse(503, …)` unhealthy path) and the matching K8s `readinessProbe` / `livenessProbe` manifest snippet, see the `aerospike-py-fastapi` skill — it carries the same pattern with the rest of the FastAPI wiring.
 
 ---
 

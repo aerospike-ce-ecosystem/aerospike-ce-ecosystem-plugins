@@ -23,14 +23,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Markdown link check (skills/agents/root)
+      - name: Markdown link check (skills/root)
         uses: gaurav-nelson/github-action-markdown-link-check@v1
         with:
           use-quiet-mode: "yes"
           use-verbose-mode: "yes"
           config-file: ".github/markdown-link-check.json"
           file-extension: ".md"
-          folder-path: "skills,agents"
+          # ``agents`` was removed when ``acko-cluster-debugger`` was demoted to
+          # the ``acko-debugging`` skill. The directory no longer exists, so
+          # listing it here would fail with "Can't find the directory: agents".
+          # Re-add a comma-separated entry only when the plugin grows agents
+          # again.
+          folder-path: "skills"
           # Also scan top-level *.md (README, CHANGELOG, VERSIONING).
           file-path: "./README.md,./CHANGELOG.md,./VERSIONING.md"
           base-branch: "main"

@@ -5,7 +5,12 @@ description: "Register one or many Aerospike Cluster Manager (ACM) MCP endpoints
 
 # ACM MCP Setup
 
-ACM exposes 21 MCP tools (records, query, asinfo, connections) at `/mcp` on its FastAPI port. Each registered endpoint becomes addressable as `mcp__aerospike-<name>__<tool>`.
+ACM exposes **27 MCP tools** at `/mcp` on its FastAPI port:
+
+* **22 data-plane tools** — connections (`list_connections`, `create_connection`, `connect`, `test_connection`, …), cluster info (`list_namespaces`, `list_sets`, `get_nodes`), asinfo (`execute_info`, `execute_info_on_node`, `execute_info_read_only`), records (`get_record`, `record_exists`, `create_record`, `update_record`, `delete_record`, `delete_bin`, `truncate_set`), query (`query`).
+* **5 K8s-plane tools** — `list_k8s_clusters`, `get_k8s_pods`, `get_k8s_events`, `get_k8s_logs`, `scale_k8s_cluster`. Available only when the ACM deployment was started with `K8S_MANAGEMENT_ENABLED=true`; on plain (non-K8s) ACM deployments only the 22 data-plane tools are exposed.
+
+Each registered endpoint becomes addressable as `mcp__aerospike-<name>__<tool>`.
 
 For each endpoint collect: **name** (becomes the prefix — e.g. `dev`, `prod-us`), **url** (e.g. `http://localhost:8000/mcp`), **token** (optional bearer, can be empty when OIDC-only or anonymous-on-localhost).
 
