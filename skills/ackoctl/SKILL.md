@@ -190,34 +190,36 @@ Cluster identifiers use the `"<namespace>/<name>"` form — always quote them in
 
 ```bash
 # Whitelisted read verbs (status, statistics, namespace/<ns>, ...) — safe by default
-ackoctl info exec <CONN_ID> --command='statistics'
-ackoctl info exec <CONN_ID> --command='namespace/test'
-ackoctl info exec <CONN_ID> --command='status' --node=BB9020014270008
+ackoctl info <CONN_ID> --command='statistics'
+ackoctl info <CONN_ID> --command='namespace/test'
+ackoctl info <CONN_ID> --command='status' --node=BB9020014270008
 
-# Mutation verbs (set-config:, recluster:, ...) require --allow-write and confirmation
-ackoctl info exec <CONN_ID> --command='set-config:context=service;proto-fd-max=20000' --allow-write --yes
+# Multiple verbs in one call: --command is repeatable
+ackoctl info <CONN_ID> --command=build --command=version
+
+# Mutation verbs (set-config:, recluster:, ...) require --allow-write
+ackoctl info <CONN_ID> --command='set-config:context=service;proto-fd-max=20000' --allow-write
 ```
 
-`ackoctl info exec` always reaches cluster-manager; it never bypasses the workspace ACL. For diagnostic reads under restricted profiles, the whitelisted-verbs path is the default; mutation verbs are an explicit opt-in.
+`ackoctl info` always reaches cluster-manager; it never bypasses the workspace ACL. For diagnostic reads under restricted profiles, the whitelisted-verbs path is the default; mutation verbs are an explicit opt-in via `--allow-write`.
 
 ### admin — users and roles (security-enabled clusters)
 
 ```bash
-# Users
-ackoctl admin user list    <CONN_ID>
-ackoctl admin user create  <CONN_ID> --name=alice --password=*** --role=read-write
-ackoctl admin user grant   <CONN_ID> --name=alice --role=sys-admin
-ackoctl admin user revoke  <CONN_ID> --name=alice --role=read-write
-ackoctl admin user passwd  <CONN_ID> --name=alice --password=***
-ackoctl admin user delete  <CONN_ID> --name=alice --yes
+# Users — --username and --roles (comma-separated; repeatable on cli).
+# --password-stdin avoids shell-history disclosure of the plaintext password.
+ackoctl admin user list   <CONN_ID>
+ackoctl admin user create <CONN_ID> --username=alice --password-stdin --roles=read-write,data-admin
+ackoctl admin user passwd <CONN_ID> --username=alice --password-stdin
+ackoctl admin user delete <CONN_ID> --username=alice --yes
 
-# Roles
-ackoctl admin role list    <CONN_ID>
-ackoctl admin role create  <CONN_ID> --name=ops-readonly --privilege=read
-ackoctl admin role delete  <CONN_ID> --name=ops-readonly --yes
+# Roles — --privilege is CODE[:NS[/SET]], repeatable.
+ackoctl admin role list   <CONN_ID>
+ackoctl admin role create <CONN_ID> --name=ops-readonly --privilege=read --privilege=read:test/users
+ackoctl admin role delete <CONN_ID> --name=ops-readonly --yes
 ```
 
-The target cluster must have security enabled in `aerospike.conf`. CE clusters managed by ACKO do **not** have enterprise security; these commands only apply when ackoctl is pointed at an Aerospike Enterprise cluster (a supported cluster-manager mode, but out of the CE happy path).
+The target cluster must have security enabled in `aerospike.conf`. CE clusters managed by ACKO do **not** have enterprise security; these commands return HTTP 403 (`Security is not enabled. Add a 'security { }' block to aerospike.conf …`) when ackoctl is pointed at a CE cluster. They only apply when ackoctl is pointed at an Aerospike Enterprise cluster (a supported cluster-manager mode, but out of the CE happy path). The user role mutation path is **create / delete only** — there is no `grant`/`revoke` verb; change a user's roles by deleting and recreating.
 
 ### udf — Lua UDF module management
 
