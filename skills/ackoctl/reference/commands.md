@@ -7,22 +7,23 @@ Compact one-line-per-verb enumeration. Use this when constructing a precise `ack
 | Verb | One-liner |
 |------|-----------|
 | `config view` | Print the merged config (~/.ackoctl/config.yaml). |
+| `config current-context` | Print only the current context name. |
 | `config use-context NAME` | Switch the current context. |
 | `config set-context NAME --server URL --token TOKEN [--workspace WS]` | Create/update a context entry. |
 | `config delete-context NAME` | Remove a context entry. |
 
 ## `connection` — cluster-manager connection profiles
 
+`--host` is repeatable (one flag per seed host); `--user`/`--pass` carry auth.
+
 | Verb | One-liner |
 |------|-----------|
 | `connection list` | List connection profiles in the current workspace. |
 | `connection get ID` | Show a single profile (no password). |
-| `connection create --name N --hosts H1,H2 --port 3000 [--username U --password P]` | Create a profile. |
-| `connection update ID [--name ... --hosts ... --color ... --note ...]` | Patch fields. |
+| `connection create --name N --host H1 [--host H2] --port 3000 [--user U --pass P]` | Create a profile. |
+| `connection update ID [--name ... --host ... --color ... --note ...]` | Patch fields. |
 | `connection delete ID --yes` | Delete a profile. |
-| `connection connect ID` | Force the profile to (re)open its aerospike-py client. |
-| `connection disconnect ID` | Close the open client. |
-| `connection test --hosts H1 --port 3000 [--username U --password P]` | Dry-run a connect attempt without persisting. |
+| `connection health ID` | Probe an existing profile's cluster: connected, build, edition, node/namespace counts, memory/disk usage. |
 
 ## `cluster` — runtime cluster inspection
 
@@ -53,7 +54,7 @@ Compact one-line-per-verb enumeration. Use this when constructing a precise `ack
 
 | Verb | One-liner |
 |------|-----------|
-| `query CONN_ID --namespace NS [--set S --filter JSON --page-size N]` | Same shape as `record query` against the explicit query endpoint. |
+| `query exec CONN_ID --namespace NS [--set S] [--bin B --op equals\|between\|contains\|geo_within_region\|geo_contains_point --value JSON [--value2 JSON]] [--expression EXPR] [--primary-key PK --pk-type ...] [--select bin1,bin2] [--max-records N]` | Execute a predicate, primary-key lookup, or full scan against the dedicated query endpoint. |
 
 ## `index` — secondary index management
 
@@ -94,7 +95,7 @@ Compact one-line-per-verb enumeration. Use this when constructing a precise `ack
 
 ## `admin` — Aerospike Enterprise user + role management
 
-CE has no security; admin commands always 5xx against CE targets but the wire is correct for EE.
+CE has no security; admin commands return 403 against CE targets (`Security is not enabled`) but the wire is correct for EE. There is no `grant`/`revoke` — change a user's role set by delete + recreate.
 
 | Verb | One-liner |
 |------|-----------|
