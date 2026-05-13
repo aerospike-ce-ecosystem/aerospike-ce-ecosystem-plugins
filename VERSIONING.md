@@ -14,17 +14,21 @@ The plugin version is recorded in `.claude-plugin/plugin.json` and tagged in git
 Each plugin release is validated against specific upstream versions of the projects it documents.
 A plugin version is expected to work with the components below; older or newer combinations are best-effort.
 
-| Plugin Version | ACKO | aerospike-py | Aerospike CE Server |
-|----------------|------|--------------|---------------------|
-| 1.0.0          | v1.0.0 (Helm chart 0.2.0) | 0.7.1 | 8.1.x (8.x supported) |
-| 1.1.0          | v1.0.0 (Helm chart 0.2.0) | 0.7.1 | 8.1.x (8.x supported) |
-| 1.2.0          | v1.2.1 | 0.10.0 | 8.1.x (8.x supported) |
-| Unreleased     | tracks ACKO `main` | tracks aerospike-py `main` | 8.x |
+| Plugin Version | ACKO | aerospike-py | ackoctl | Aerospike CE Server |
+|----------------|------|--------------|---------|---------------------|
+| 1.0.0          | v1.0.0 (Helm chart 0.2.0) | 0.7.1 | n/a (ACM MCP)      | 8.1.x (8.x supported) |
+| 1.1.0          | v1.0.0 (Helm chart 0.2.0) | 0.7.1 | n/a (ACM MCP)      | 8.1.x (8.x supported) |
+| 1.2.0          | v1.2.1 | 0.10.0 | n/a (ACM MCP) | 8.1.x (8.x supported) |
+| 2.0.0          | v1.2.1 | 0.10.0 | v0.2.0 (admin/udf/info) | 8.1.x (8.x supported) |
+| Unreleased     | tracks ACKO `main` | tracks aerospike-py `main` | tracks ackoctl `main` | 8.x |
 
 Sources for the 1.0.0 row:
 - ACKO: latest git tag in `aerospike-ce-kubernetes-operator` (`v1.0.0`); Helm chart `charts/aerospike-ce-kubernetes-operator/Chart.yaml` `version: 0.2.0`.
 - aerospike-py: latest git tag in `aerospike-py` (`v0.7.1`).
 - Aerospike CE: skills target CE 8.1 (`acko-config-reference`, `acko-deploy`); 8.x line broadly supported.
+
+Notes for the 2.0.0 row:
+- The `acm-mcp-init` skill is removed in 2.0.0 — the cluster-manager MCP HTTP server is retired. The new `ackoctl` skill replaces it; the matrix pins `ackoctl >= v0.2.0` because that is the first release with `admin`, `udf`, and `info` parity for the surface previously exposed via MCP.
 
 ## Deprecation Policy
 

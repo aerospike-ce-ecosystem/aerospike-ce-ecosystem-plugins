@@ -1,6 +1,6 @@
 ---
 name: acko-debugging
-description: "Systematic 6-step diagnosis procedure for ACKO-managed Aerospike CE clusters, with CE 8.1-specific pitfalls and a remediation matrix. Routes data-plane and K8s-plane probes through ACM MCP tools when registered, and falls back to kubectl/asinfo otherwise. MUST USE when the user reports CrashLoopBackOff, AerospikeCluster CRD phase=Error / WaitingForMigration / InProgress stuck, dynamic config rollback failed, ConfigDegraded, circuit breaker active, namespace stop-writes, split cluster, ACLSyncError, RestartFailed, ReadinessGateBlocking, ScaleDownDeferred, operator log errors, webhook rejection, or any troubleshooting flow that resolves to running diagnostic commands or queries against an ACKO Aerospike cluster. Triggers on: 'CrashLoopBackOff', 'phase=Error', 'reconcile failure', 'cluster won''t start', 'pods stuck', 'migration stuck', 'dynamic config failed', 'CE 8.1 config error', 'AerospikeCluster reconcile', 'debug aerospike cluster', 'troubleshoot ACKO'."
+description: "Systematic 6-step diagnosis procedure for ACKO-managed Aerospike CE clusters, with CE 8.1-specific pitfalls and a remediation matrix. Routes data-plane and K8s-plane probes through ackoctl (which calls cluster-manager — the authoritative source for AerospikeCluster state) and falls back to kubectl/asinfo when ackoctl is unavailable. MUST USE when the user reports CrashLoopBackOff, AerospikeCluster CRD phase=Error / WaitingForMigration / InProgress stuck, dynamic config rollback failed, ConfigDegraded, circuit breaker active, namespace stop-writes, split cluster, ACLSyncError, RestartFailed, ReadinessGateBlocking, ScaleDownDeferred, operator log errors, webhook rejection, or any troubleshooting flow that resolves to running diagnostic commands or queries against an ACKO Aerospike cluster. Triggers on: 'CrashLoopBackOff', 'phase=Error', 'reconcile failure', 'cluster won''t start', 'pods stuck', 'migration stuck', 'dynamic config failed', 'CE 8.1 config error', 'AerospikeCluster reconcile', 'debug aerospike cluster', 'troubleshoot ACKO'."
 ---
 
 # ACKO Cluster Debugging Procedure
@@ -11,40 +11,50 @@ This skill provides the systematic procedure to follow when an ACKO-managed Aero
 2. The CE 8.1-specific config pitfalls that surface as cryptic boot failures,
 3. A remediation matrix mapping observed symptoms to concrete fixes.
 
-For routine reads (`list_k8s_clusters`, `get_k8s_pods` etc.) the MCP tools are self-describing and you do **not** need this skill — call them directly. Load this skill when something is actually broken.
+For routine reads (`ackoctl k8s cluster list`, `ackoctl record get`, …) the CLI is self-describing — use `ackoctl <noun> --help` for shape. Load this skill when something is actually broken.
 
-## Tool routing — MCP first, kubectl fallback
+## Tool routing — ackoctl first, kubectl fallback
 
-When ACM MCP is registered (`mcp__aerospike-*` tools available in the session) prefer it for *both* planes:
+Prefer `ackoctl` for **both** planes. It goes through cluster-manager, which is the authoritative source for AerospikeCluster state (it normalises CR status fields, classifies K8s events, and enforces workspace ACL). Fall back to `kubectl` / direct `asinfo` only when `ackoctl` is unavailable, or when a field the cluster-manager summary does not surface yet is needed.
 
-* **Data plane** — `list_namespaces`, `get_nodes`, `execute_info`, `query`, `get_record`, `record_exists`, `list_sets`.
-* **K8s plane** — `list_k8s_clusters`, `get_k8s_pods`, `get_k8s_events`, `get_k8s_logs`, `scale_k8s_cluster`. These five are exposed only when the ACM deployment runs with `K8S_MANAGEMENT_ENABLED=true`. If `tools/list` for the chosen prefix does not include them, fall back to `kubectl` for the K8s plane.
+- **Data plane** — `ackoctl cluster info`, `ackoctl info exec --command=...`, `ackoctl query exec`, `ackoctl record get`, `ackoctl set list`.
+- **K8s plane** — `ackoctl k8s cluster list / get / reconcile / scale`, `ackoctl k8s pod logs`, `ackoctl k8s events list`. Requires cluster-manager started with `K8S_MANAGEMENT_ENABLED=true`; if `ackoctl k8s cluster list` returns a 404, fall back to `kubectl` for the K8s plane.
 
-If **no `mcp__aerospike-*` tools are available** in this session, tell the user:
+If `ackoctl` is not installed or no context is configured, tell the user:
 
-> ACM MCP is not registered in this session. Run `/acm-mcp-init` (or invoke the `acm-mcp-init` skill) to register one or more cluster-manager endpoints, then retry. You may still proceed with `kubectl`-only diagnosis, but data-plane probes (`asinfo`, record sampling, query) will be limited to `kubectl exec` rather than the typed MCP layer.
+> ackoctl is not configured in this session. Install via `curl -fsSL https://raw.githubusercontent.com/aerospike-ce-ecosystem/ackoctl/main/install.sh | sh` and run `ackoctl config set-context <name> --server=<url> --token=<jwt> --workspace-id=<ws>` to point at a cluster-manager. You may proceed with `kubectl`-only diagnosis in the meantime, but data-plane probes (`asinfo`, record sampling, query) will go through `kubectl exec` rather than the typed cluster-manager surface.
+
+The `ackoctl` skill covers install and configuration in full.
 
 ## Cluster selection
 
-Many users run multi-cluster ACKO. The user's wording usually indicates which cluster — phrases like "in dev", "production EU", "the prod-us cluster". Map the named cluster to the registered MCP prefix:
+Many users run multi-cluster ACKO. The user's wording usually indicates which cluster — phrases like "in dev", "production EU", "the prod-us cluster". Map the named cluster to the configured ackoctl context:
 
-| User says | MCP prefix used |
-|-----------|-----------------|
-| "in dev" / "local" / "my workstation" | `mcp__aerospike-dev__*` |
-| "in staging" | `mcp__aerospike-staging__*` |
-| "in prod-us" / "production US" | `mcp__aerospike-prod-us__*` |
+| User says | ackoctl context used |
+|-----------|----------------------|
+| "in dev" / "local" / "my workstation" | `--context=kind-local` (or whatever is the current-context) |
+| "in staging" | `--context=staging` |
+| "in prod-us" / "production US" | `--context=prod-us` |
 
-When multiple ACM endpoints could match or none is named, list registered endpoints (`claude mcp list`) and ask the user to disambiguate. Replace `{prefix}` below with the resolved prefix.
+When multiple contexts could match or none is named, list configured contexts (`ackoctl config view -o yaml`) and ask the user to disambiguate. Below, replace `{ctx}` with the resolved context name — or omit `--context` to use the current-context.
 
-## Mutation tools — confirm before invoking
+## Mutation commands — confirm before invoking
 
-The MCP server enforces a **call-time** read/write gate. Under the default `READ_ONLY` profile the eleven mutation tools below return `MCPToolError(code="access_denied")` before the body runs — this is the safety net.
+These ackoctl invocations mutate cluster state. Always confirm with the user before running them — the workspace ACL on the server is the safety net, but blast radius is the user's call:
 
-If the deployment is configured with `ACM_MCP_ACCESS_PROFILE=full` the server-side gate is *off* and only this skill's confirmation rule remains. **Always confirm with the user before invoking any of the eleven mutation tools**:
+| Command | Blast radius |
+|---------|--------------|
+| `ackoctl record put` / `record delete` | Single-record write/delete |
+| `ackoctl cluster configure-namespace` | Runtime config change on the live cluster (`asinfo set-config`) |
+| `ackoctl info exec --allow-write` | Raw asinfo with mutation verbs (`set-config:`, `recluster:`) |
+| `ackoctl index create` / `index delete` | Server-side index DDL |
+| `ackoctl k8s cluster scale` | Patches `spec.size` on the AerospikeCluster CR — same blast radius as `kubectl patch` |
+| `ackoctl k8s cluster reconcile` | Stamps `acko.io/force-reconcile`; triggers operator reconciliation |
+| `ackoctl udf register` / `udf remove` | Cluster-wide UDF module change |
+| `ackoctl admin user/role *` | Identity changes (security-enabled clusters only) |
+| `ackoctl connection delete` | Removes the profile **and** cascades all attached notes |
 
-`create_connection`, `update_connection`, `delete_connection`, `create_record`, `update_record`, `delete_record`, `delete_bin`, `truncate_set`, `execute_info`, `execute_info_on_node`, `scale_k8s_cluster`.
-
-`execute_info` is in the mutation list because asinfo can change cluster config (`set-config:`, `recluster:`, etc.); `scale_k8s_cluster` patches the AerospikeCluster CR's `spec.size` so it carries the same blast radius as a direct `kubectl patch`. For diagnostic asinfo reads under `READ_ONLY`, prefer `execute_info_read_only` (whitelisted verbs only) which is **not** in the mutation list.
+For diagnostic reads, prefer the no-side-effect verbs: `ackoctl k8s cluster get`, `ackoctl info exec` without `--allow-write` (whitelisted read verbs only), `ackoctl query exec`, `ackoctl record get`.
 
 ## Debugging procedure
 
@@ -52,41 +62,40 @@ Execute these steps in order. Stop and report findings as soon as you identify t
 
 ### Step 1 — Gather cluster overview
 
-**Data-plane discovery via MCP.** The user must have an active connection profile registered with ACM (created via the cluster-manager UI or the `create_connection` MCP tool).
+**Data-plane discovery via ackoctl.** The user must have a connection profile registered with cluster-manager (created via the UI or `ackoctl connection create`).
 
-If the user has not specified a `conn_id`, list available profiles first:
+If the user has not specified a `CONN_ID`, list available profiles first:
 
-```
+```bash
 # 1. Find an existing connection profile to drive the diagnosis
-mcp__aerospike-{prefix}__list_connections()
-# 2. If the list is empty, ask the user to create one before continuing,
-#    or create one inline with their input (mutation — confirm first):
-#    mcp__aerospike-{prefix}__create_connection(name="<...>", hosts=["<...>"], port=3000)
+ackoctl --context={ctx} connection list
+# 2. If the list is empty, create one (mutation — confirm first):
+#    ackoctl connection create --name <name> --host <host> --port 3000
 ```
 
-Then run discovery against the selected `conn_id`:
+Then run discovery against the selected `CONN_ID`:
 
-```
-mcp__aerospike-{prefix}__list_namespaces(conn_id="<conn>")
-mcp__aerospike-{prefix}__get_nodes(conn_id="<conn>")
-mcp__aerospike-{prefix}__execute_info(conn_id="<conn>", command="statistics")
-```
-
-Use `execute_info` results to see `cluster_size`, `migration_status`, `stop_writes`, etc. across all nodes.
-
-**K8s-plane status — prefer MCP** (`K8S_MANAGEMENT_ENABLED=true` deployments only):
-
-```
-mcp__aerospike-{prefix}__list_k8s_clusters()
-mcp__aerospike-{prefix}__list_k8s_clusters(workspace_id="<ws>")        # filter by workspace label
-mcp__aerospike-{prefix}__get_k8s_pods(cluster_id="<ns>/<name>")        # phase/podIP/dynamicConfigStatus per pod
-mcp__aerospike-{prefix}__get_k8s_events(cluster_id="<ns>/<name>", since_minutes=30)
-mcp__aerospike-{prefix}__get_k8s_logs(cluster_id="<ns>/<name>", pod_name="<pod>", since_seconds=300, tail_lines=200)
+```bash
+ackoctl --context={ctx} cluster info <CONN_ID> -o yaml
+ackoctl --context={ctx} info exec  <CONN_ID> --command='statistics'
+ackoctl --context={ctx} info exec  <CONN_ID> --command='status'
 ```
 
-`cluster_id` is `"<namespace>/<name>"`. The CR phase, size, conditions, and migration status are all in the `list_k8s_clusters` summary entry — there is no need to shell out for every field.
+Use `statistics` output to see `cluster_size`, `migration_status`, `stop_writes`, etc. across all nodes. `cluster info` already aggregates nodes, namespaces, sets and sindex counts.
 
-**`kubectl` fallback** (when MCP K8s tools are not exposed by the ACM deployment, or when fields the MCP summary doesn't surface yet are needed):
+**K8s-plane status — prefer ackoctl** (cluster-manager started with `K8S_MANAGEMENT_ENABLED=true`):
+
+```bash
+ackoctl --context={ctx} k8s cluster list                                            # all CRs in the workspace
+ackoctl --context={ctx} k8s cluster list --workspace=<ws>                           # explicit workspace filter
+ackoctl --context={ctx} k8s cluster get <ns>/<name> -o yaml                         # phase, size, conditions, dynamicConfigStatus
+ackoctl --context={ctx} k8s events list <ns>/<name> --since=30m                     # classified events
+ackoctl --context={ctx} k8s pod logs <ns>/<name> --pod=<pod> --container=aerospike-server --since=5m --tail=200
+```
+
+The CR phase, size, conditions, and migration status are all in the `k8s cluster get` payload — no need to shell out for every field.
+
+**`kubectl` fallback** (when cluster-manager's K8s tools are not exposed, or when fields the summary does not surface yet are needed):
 
 ```bash
 kubectl get asc -n <ns>
@@ -122,8 +131,8 @@ Check for:
 kubectl get asc <name> -n <ns> -o jsonpath='{.status.migrationStatus}' | jq .
 # Per-pod migration partitions
 kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods}' | jq 'to_entries[] | {pod: .key, migrating: .value.migratingPartitions}'
-# Direct asinfo check
-kubectl exec -n <ns> <pod> -c aerospike-server -- asinfo -v 'statistics' | tr ';' '\n' | grep migrate
+# Direct asinfo check via ackoctl
+ackoctl --context={ctx} info exec <CONN_ID> --command='statistics' | tr ';' '\n' | grep migrate
 ```
 
 This is usually normal during scale-down. Report `migrationStatus.remainingPartitions` progress and advise waiting.
@@ -144,31 +153,26 @@ Check for:
 
 #### If Phase = `Completed` but user reports issues
 
-**Prefer MCP** for data-plane probes:
+**Prefer ackoctl** for data-plane probes:
 
-```
+```bash
 # Status, statistics, namespace details — per-node where useful.
-mcp__aerospike-{prefix}__execute_info(conn_id="<conn>", command="status")
-mcp__aerospike-{prefix}__execute_info(conn_id="<conn>", command="statistics")
-mcp__aerospike-{prefix}__execute_info(conn_id="<conn>", command="namespace/<ns-name>")
+ackoctl --context={ctx} info exec <CONN_ID> --command='status'
+ackoctl --context={ctx} info exec <CONN_ID> --command='statistics'
+ackoctl --context={ctx} info exec <CONN_ID> --command='namespace/<ns-name>'
 # Sample-record sanity check
-mcp__aerospike-{prefix}__query(conn_id="<conn>", namespace="<ns-name>", set_name="<set>", max_records=5)
-# Filtered probe — predicate uses flat fields (predicate_bin / predicate_operator
-# / predicate_value / predicate_value2). Useful for narrowing in on records that
-# match a suspected fault signal, e.g. records past a TTL boundary.
-mcp__aerospike-{prefix}__query(
-    conn_id="<conn>",
-    namespace="<ns-name>",
-    set_name="<set>",
-    predicate_bin="age", predicate_operator="between",
-    predicate_value=18, predicate_value2=99,
-    max_records=20,
-)
+ackoctl --context={ctx} query exec <CONN_ID> --namespace=<ns-name> --set=<set> --max-records=5
+# Filtered probe — useful for narrowing in on records that match a suspected
+# fault signal, e.g. records past a TTL boundary.
+ackoctl --context={ctx} query exec <CONN_ID> \
+  --namespace=<ns-name> --set=<set> \
+  --bin=age --op=between --value=18 --value2=99 \
+  --select=name,age --max-records=20
 ```
 
-When `query` returns `truncated: true`, the result set was capped by `max_records` (or the server-side ceiling). For diagnosis this usually means "there are more matching records than you asked to see"; either tighten the predicate or raise `max_records` for the next call. Don't silently report the partial set as the whole picture.
+When `query exec` returns a truncation marker, the result set was capped by `--max-records` (or the server-side ceiling). For diagnosis this usually means "there are more matching records than you asked to see"; either tighten the predicate or raise `--max-records` for the next call. Don't silently report the partial set as the whole picture.
 
-`kubectl exec` fallback (only if MCP path is unavailable):
+`kubectl exec` fallback (only if `ackoctl` is unavailable):
 
 ```bash
 kubectl get pods -n <ns> -l aerospike.io/cr-name=<name>
@@ -193,12 +197,17 @@ Meaning: a 2PC dynamic config update failed AND the LIFO rollback also failed. D
 
 ### Step 3 — Check pod-level issues
 
-For any pods not in `Running` state:
+For any pods not in `Running` state — prefer ackoctl, fall back to kubectl:
 
 ```bash
+# ackoctl path
+ackoctl --context={ctx} k8s pod logs <ns>/<name> --pod=<pod> --container=aerospike-server --since=10m --tail=200
+ackoctl --context={ctx} k8s pod logs <ns>/<name> --pod=<pod> --container=aerospike-server --previous   # if CrashLoopBackOff
+
+# kubectl fallback
 kubectl describe pod <pod> -n <ns>
 kubectl logs -n <ns> <pod> -c aerospike-server
-kubectl logs -n <ns> <pod> -c aerospike-server --previous   # if CrashLoopBackOff
+kubectl logs -n <ns> <pod> -c aerospike-server --previous
 ```
 
 Common pod-level issues:
@@ -219,10 +228,10 @@ Look for:
 
 ### Step 5 — Check events timeline
 
-**Prefer MCP** (already classifies each event into `Rolling Restart`, `Configuration`, `Scaling`, `Network`, `Rack Management`, …):
+**Prefer ackoctl** (already classifies each event into `Rolling Restart`, `Configuration`, `Scaling`, `Network`, `Rack Management`, …):
 
-```
-mcp__aerospike-{prefix}__get_k8s_events(cluster_id="<ns>/<name>", since_minutes=60)
+```bash
+ackoctl --context={ctx} k8s events list <ns>/<name> --since=60m
 ```
 
 `kubectl` fallback (raw, unclassified):

@@ -51,14 +51,14 @@
     },
     {
       "id": 9,
-      "prompt": "Register two ACM MCP endpoints with Claude Code: dev at http://localhost:8000/mcp and prod-us at https://acm.prod-us.example.com/mcp with bearer token 'tk_prod_xxx'. Verify both are listed.",
-      "expected_output": "acm-mcp-init skill triggers; probes each URL with an MCP initialize POST (not a naked GET) before registering; runs claude mcp add --transport http aerospike-dev http://localhost:8000/mcp; runs claude mcp add --transport http aerospike-prod-us https://acm.prod-us.example.com/mcp -H 'Authorization: Bearer tk_prod_xxx'; runs claude mcp list to confirm both aerospike-dev and aerospike-prod-us are present",
+      "prompt": "Set up two ackoctl contexts: dev pointing at http://localhost:8000/api with workspace=default, and prod-us pointing at https://acm.prod-us.example.com/api with bearer token 'tk_prod_xxx' and workspace=prod-us. Make prod-us the current context and verify both are listed.",
+      "expected_output": "ackoctl skill triggers; runs ackoctl config set-context dev --server=http://localhost:8000/api --workspace-id=default; runs ackoctl config set-context prod-us --server=https://acm.prod-us.example.com/api --token=tk_prod_xxx --workspace-id=prod-us; runs ackoctl config use-context prod-us; runs ackoctl config view -o yaml (or current-context) to confirm both dev and prod-us contexts are present and prod-us is the active context",
       "files": []
     },
     {
       "id": 10,
-      "prompt": "I have ACM MCP set up at aerospike-dev. Cluster prod is reporting CrashLoopBackOff on pods. Walk me through diagnosis using the MCP tools where available.",
-      "expected_output": "acko-debugging skill triggers (was the acko-cluster-debugger agent before its demotion to a skill); uses mcp__aerospike-dev__list_namespaces / __get_nodes / __execute_info for the data plane and mcp__aerospike-dev__list_k8s_clusters / __get_k8s_pods / __get_k8s_events / __get_k8s_logs for the K8s plane (the K8s MCP tools shipped in ACM PR #305/#313). Falls back to kubectl only when the ACM deployment was started without K8S_MANAGEMENT_ENABLED=true and the K8s prefix is missing from tools/list. Never calls any of the eleven mutation tools (gated by ACM's READ_ONLY profile, including scale_k8s_cluster) without explicit user confirmation",
+      "prompt": "I have ackoctl set up against my prod cluster (context prod-us). Cluster prod is reporting CrashLoopBackOff on pods. Walk me through diagnosis using ackoctl where available.",
+      "expected_output": "acko-debugging skill triggers (was the acko-cluster-debugger agent before its demotion to a skill); uses ackoctl --context=prod-us cluster info / ackoctl info exec for the data plane and ackoctl --context=prod-us k8s cluster list / k8s cluster get / k8s pod logs / k8s events list for the K8s plane. Falls back to kubectl only when ackoctl is unavailable or cluster-manager was started without K8S_MANAGEMENT_ENABLED=true (ackoctl k8s commands return 404). Never invokes destructive verbs (record put/delete, cluster configure-namespace, info exec --allow-write, index create/delete, k8s cluster scale, k8s cluster reconcile, udf register/remove, admin user/role mutations, connection delete) without explicit user confirmation",
       "files": []
     },
     {
