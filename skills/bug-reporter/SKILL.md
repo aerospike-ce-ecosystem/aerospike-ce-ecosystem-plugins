@@ -140,7 +140,7 @@ UI 버그:
 
 - 영향받는 repo 목록 (`cross-repo` 라벨 후보)
 - 문서 오류라면 정확한 URL과 라인
-- ADR 제안이라면 [ADR 템플릿](https://github.com/aerospike-ce-ecosystem/project-hub/blob/main/docs/docs/architecture/adr/_template.md) 사용
+- ADR 제안이라면 [기존 ADR 디렉토리](https://github.com/aerospike-ce-ecosystem/project-hub/tree/main/docs/docs/architecture/adr)의 형식을 참고
 
 ---
 
