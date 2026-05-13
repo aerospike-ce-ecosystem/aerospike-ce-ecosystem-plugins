@@ -60,6 +60,24 @@
       "prompt": "I have ACM MCP set up at aerospike-dev. Cluster prod is reporting CrashLoopBackOff on pods. Walk me through diagnosis using the MCP tools where available.",
       "expected_output": "acko-debugging skill triggers (was the acko-cluster-debugger agent before its demotion to a skill); uses mcp__aerospike-dev__list_namespaces / __get_nodes / __execute_info for the data plane and mcp__aerospike-dev__list_k8s_clusters / __get_k8s_pods / __get_k8s_events / __get_k8s_logs for the K8s plane (the K8s MCP tools shipped in ACM PR #305/#313). Falls back to kubectl only when the ACM deployment was started without K8S_MANAGEMENT_ENABLED=true and the K8s prefix is missing from tools/list. Never calls any of the eleven mutation tools (gated by ACM's READ_ONLY profile, including scale_k8s_cluster) without explicit user confirmation",
       "files": []
+    },
+    {
+      "id": 11,
+      "prompt": "My ACKO operator pod keeps CrashLooping after I patched the AerospikeCluster CR. Where do I file this bug?",
+      "expected_output": "bug-reporter skill triggers; routes to aerospike-ce-kubernetes-operator repo (https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/issues/new); asks for the AerospikeCluster CR YAML (sanitized), kubectl describe asc Events, operator log slice, phase/conditions, and ACKO image version; suggests duplicate search via gh issue list --search before filing",
+      "files": []
+    },
+    {
+      "id": 12,
+      "prompt": "aerospike_py에서 batch_write 호출하니 Rust panic이 났어. 어디다 제보해야 해?",
+      "expected_output": "bug-reporter skill triggers; routes to aerospike-py repo (https://github.com/aerospike-ce-ecosystem/aerospike-py/issues/new); asks for python --version, pip show aerospike-py, the 5-20 line reproducer, the full traceback, and RUST_BACKTRACE=1 output for the panic",
+      "files": []
+    },
+    {
+      "id": 13,
+      "prompt": "cluster-manager UI에서 Record browser 페이지가 500을 내는데 어디 repo에 이슈 올려야 돼?",
+      "expected_output": "bug-reporter skill triggers; routes to aerospike-cluster-manager repo (https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/issues/new); asks for browser+version, the failing URL path, browser console error, failing Network tab request/response, and screenshot or /api/v1/version output",
+      "files": []
     }
   ]
 }
