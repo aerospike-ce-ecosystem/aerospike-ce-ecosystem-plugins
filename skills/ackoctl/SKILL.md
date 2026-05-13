@@ -1,0 +1,259 @@
+---
+name: ackoctl
+description: "MUST USE when the user wants to manage Aerospike clusters via the ackoctl CLI — listing connections, browsing records and sets, running filtered queries, managing secondary indexes, attaching operator notes to records/sets, running raw asinfo (ackoctl info), managing K8s AerospikeCluster CRs (list/get/scale/logs/events/reconcile), administering users/roles, and managing Lua UDF modules. Triggers on: ackoctl, manage Aerospike connection, browse records, run query, scale cluster, get pod logs, asinfo command, K8s aerospike cluster, register UDF, create Aerospike user. Replaces the legacy ACM MCP server — ackoctl is the canonical way to drive cluster-manager from Claude Code."
+---
+
+# ackoctl — cluster-manager CLI for Claude Code
+
+`ackoctl` is the [Go CLI](https://github.com/aerospike-ce-ecosystem/ackoctl) for [aerospike-cluster-manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager). It calls cluster-manager's REST API at `/api/v1/*` — it does **not** talk to Kubernetes or Aerospike directly, so every action is mediated by the same FastAPI surface that the web UI uses.
+
+This skill replaces the legacy `acm-mcp-init` skill. The MCP HTTP server inside cluster-manager has been retired in favor of the CLI: there is **no `claude mcp add`**, no DNS-rebinding allowlist, and no Origin allowlist — the security surface shrank because there is no MCP HTTP server. Claude shells out to `ackoctl` like it would to `kubectl` or `gh`.
+
+When in doubt about a specific invocation, consult [`./reference/commands.md`](./reference/commands.md).
+
+## 1. Install
+
+```bash
+# macOS and Linux — same one-liner, no Homebrew required
+curl -fsSL https://raw.githubusercontent.com/aerospike-ce-ecosystem/ackoctl/main/install.sh | sh
+
+# Verify
+ackoctl version
+```
+
+Wheels for darwin/linux × amd64/arm64 are detected automatically and the sha256 is verified before install. For pinned versions, `BIN_DIR`, manual install or source build, see [ackoctl install docs](https://github.com/aerospike-ce-ecosystem/ackoctl/blob/main/docs/install.md).
+
+## 2. Configure
+
+`ackoctl` reads `~/.ackoctl/config.yaml` — same kubeconfig-style multi-context shape kubectl uses.
+
+```bash
+# Register a context pointing at a local cluster-manager
+ackoctl config set-context kind-local \
+  --server=http://localhost:8000/api \
+  --workspace-id=default
+
+# Register a prod context with a bearer token
+ackoctl config set-context prod \
+  --server=https://acm.example.com/api \
+  --token=eyJ... \
+  --workspace-id=prod-us
+
+ackoctl config use-context kind-local
+ackoctl config current-context
+ackoctl config view -o yaml
+```
+
+Override priority: **CLI flag > environment variable > config file**.
+
+| Env var | Equivalent flag | Notes |
+|---------|-----------------|-------|
+| `ACKOCTL_CONFIG`    | `--config`    | Override config file location |
+| `ACKOCTL_CONTEXT`   | `--context`   | Pick a context for this call |
+| `ACKOCTL_SERVER`    | `--server`    | One-off server override |
+| `ACKOCTL_TOKEN`     | `--token`     | Bearer JWT (no interactive login) |
+| `ACKOCTL_WORKSPACE` | `--workspace` | Workspace ID for ACL scoping |
+
+`ackoctl` has no `login` command — bring your own OIDC JWT (Keycloak CLI, browser device flow, etc.). Use `--insecure-skip-tls` for dev-only TLS bypass and `-v` for verbose logging to stderr.
+
+## 3. Command grammar
+
+```
+ackoctl <noun> <verb> [flags]
+```
+
+gh / aws / kubectl style: `ackoctl connection list`, not `ackoctl get connections`.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-o table\|json\|yaml` | `table` | Output format. Use `-o json`/`-o yaml` for any scripted consumption. |
+| `--workspace ID` | from current context | Workspace ACL scope — never falls back to "first workspace" silently. |
+| `--context NAME` | `current-context` | Use a specific context for this call. |
+| `--server URL` / `--token TOKEN` | from context | One-off overrides. |
+
+For lists and gets, default to `-o table` for human consumption and switch to `-o json` / `-o yaml` whenever Claude needs to parse the output downstream.
+
+## 4. Commands by noun
+
+### connection — Aerospike connection profiles
+
+```bash
+ackoctl connection list
+ackoctl connection get <ID>
+ackoctl connection create \
+  --name local-aero \
+  --host aerospike-node-1 --host aerospike-node-2 \
+  --port 3000 \
+  --label env=dev --label team=platform
+ackoctl connection health <ID>     # live probe — always returns 200; see `connected` field
+```
+
+`update` and `delete` follow the same noun/verb pattern. Connection IDs are stable UUIDs — store them in scripts; names can change.
+
+### cluster — cluster inspection and namespace tuning
+
+```bash
+ackoctl cluster info <CONN_ID> -o yaml
+ackoctl cluster configure-namespace <CONN_ID> \
+  --name=test \
+  --param=high-water-disk-pct=70 \
+  --param=stop-writes-pct=90
+```
+
+`configure-namespace` issues `asinfo set-config` under the hood — only **runtime-mutable** namespace knobs apply. Aerospike CE cannot create namespaces at runtime: those live in `aerospike.conf` (managed by ACKO).
+
+### set — derived set inventory
+
+```bash
+ackoctl set list <CONN_ID>                       # all namespaces
+ackoctl set list <CONN_ID> --namespace=test      # one namespace
+```
+
+There is no dedicated `/sets` endpoint; ackoctl pulls cluster info and projects `namespaces[].sets[]`.
+
+### record — data plane
+
+```bash
+ackoctl record list   <CONN_ID> --namespace=test --set=users --page-size=100
+ackoctl record get    <CONN_ID> --namespace=test --set=users --pk=alice
+ackoctl record put    <CONN_ID> --namespace=test --set=users --pk=alice \
+  --bins='{"name":"Alice","age":30}' --ttl=3600
+ackoctl record delete <CONN_ID> --namespace=test --set=users --pk=alice --yes
+ackoctl record query  <CONN_ID> --namespace=test --set=users \
+  --pk-pattern='ali' --pk-match-mode=prefix --select=name,age --page-size=50
+```
+
+`--filter` / `--predicate` accept raw JSON for the full `FilterGroup` / `QueryPredicate` DSL. `--pk-type` pins the particle type (`auto|string|int|bytes`); `auto` retries the alternate type on `NOT_FOUND`.
+
+### query — predicate, pk-lookup, full scan
+
+```bash
+# Predicate — --value/--value2 parse as JSON, so 30 stays int and "alice" stays string
+ackoctl query exec <CONN_ID> --namespace=test --set=users \
+  --bin=age --op=between --value=18 --value2=30 --select=name,age
+
+# Primary-key lookup
+ackoctl query exec <CONN_ID> --namespace=test --set=users \
+  --primary-key=alice --pk-type=string
+
+# Full scan capped at 1000
+ackoctl query exec <CONN_ID> --namespace=test --set=users --max-records=1000
+```
+
+Operators: `equals | between | contains | geo_within_region | geo_contains_point`.
+
+### index — secondary indexes
+
+```bash
+ackoctl index list   <CONN_ID>
+ackoctl index create <CONN_ID> --namespace=test --set=users \
+  --bin=age --name=idx_age --type=numeric
+ackoctl index delete <CONN_ID> --namespace=test --name=idx_age --yes
+```
+
+`--type`: `numeric | string | geo2dsphere`.
+
+### note — operator notes on sets and records
+
+```bash
+# Set-level notes
+ackoctl note set update <CONN_ID> --namespace=test --set=users \
+  --note='migration in progress — ticket OPS-1234'
+ackoctl note set list   <CONN_ID>
+ackoctl note set delete <CONN_ID> --namespace=test --set=users --yes
+
+# Record-level notes
+ackoctl note record update <CONN_ID> --namespace=test --set=users \
+  --pk=alice --note='under investigation, do not delete'
+ackoctl note record list   <CONN_ID> --namespace=test --set=users
+```
+
+Notes live in cluster-manager's metaDB (not in Aerospike). They are scoped per connection profile and cascade-delete with the connection. Use them to attach runbook context, ticket references, or known-issue annotations.
+
+### k8s — ACKO-managed AerospikeCluster CRs
+
+Requires cluster-manager to have `K8S_MANAGEMENT_ENABLED=true`. Otherwise the server returns 404.
+
+```bash
+ackoctl k8s cluster list                                 # all AerospikeCluster CRs
+ackoctl k8s cluster get aerospike/sample-cluster         # <namespace>/<name>
+ackoctl k8s cluster reconcile aerospike/sample-cluster   # stamp acko.io/force-reconcile
+ackoctl k8s cluster scale aerospike/sample-cluster --size=5
+ackoctl k8s pod logs aerospike/sample-cluster --pod=sample-cluster-0-0 \
+  --container=aerospike-server --since=5m --tail=200
+ackoctl k8s events list aerospike/sample-cluster --since=30m
+```
+
+Cluster identifiers use the `"<namespace>/<name>"` form — always quote them in shell.
+
+### info — raw asinfo via cluster-manager
+
+```bash
+# Whitelisted read verbs (status, statistics, namespace/<ns>, ...) — safe by default
+ackoctl info exec <CONN_ID> --command='statistics'
+ackoctl info exec <CONN_ID> --command='namespace/test'
+ackoctl info exec <CONN_ID> --command='status' --node=BB9020014270008
+
+# Mutation verbs (set-config:, recluster:, ...) require --allow-write and confirmation
+ackoctl info exec <CONN_ID> --command='set-config:context=service;proto-fd-max=20000' --allow-write --yes
+```
+
+`ackoctl info exec` always reaches cluster-manager; it never bypasses the workspace ACL. For diagnostic reads under restricted profiles, the whitelisted-verbs path is the default; mutation verbs are an explicit opt-in.
+
+### admin — users and roles (security-enabled clusters)
+
+```bash
+# Users
+ackoctl admin user list    <CONN_ID>
+ackoctl admin user create  <CONN_ID> --name=alice --password=*** --role=read-write
+ackoctl admin user grant   <CONN_ID> --name=alice --role=sys-admin
+ackoctl admin user revoke  <CONN_ID> --name=alice --role=read-write
+ackoctl admin user passwd  <CONN_ID> --name=alice --password=***
+ackoctl admin user delete  <CONN_ID> --name=alice --yes
+
+# Roles
+ackoctl admin role list    <CONN_ID>
+ackoctl admin role create  <CONN_ID> --name=ops-readonly --privilege=read
+ackoctl admin role delete  <CONN_ID> --name=ops-readonly --yes
+```
+
+The target cluster must have security enabled in `aerospike.conf`. CE clusters managed by ACKO do **not** have enterprise security; these commands only apply when ackoctl is pointed at an Aerospike Enterprise cluster (a supported cluster-manager mode, but out of the CE happy path).
+
+### udf — Lua UDF module management
+
+```bash
+ackoctl udf list     <CONN_ID>
+ackoctl udf register <CONN_ID> --file=./examples/sum.lua --name=sum.lua
+ackoctl udf get      <CONN_ID> --name=sum.lua -o yaml          # source + metadata
+ackoctl udf remove   <CONN_ID> --name=sum.lua --yes
+```
+
+UDF registration is cluster-wide; the operator note (`ackoctl note record update`) is the right place to record provenance / ticket links for the module.
+
+## 5. Workspace ACL and auth
+
+- `--workspace ID` is honored on every resource command. The default comes from the active context's `workspace-id`. ackoctl never falls back to "first workspace" silently — missing scope is a hard error.
+- Auth is **bearer token only**. There is no `ackoctl login`; users bring their own OIDC JWT (Keycloak CLI, browser device flow, …) and store it in the context or pass it per-call via `--token` / `ACKOCTL_TOKEN`.
+- For multi-cluster ACKO, register one context per cluster-manager instance (`kind-local`, `prod-us`, `prod-eu`) and switch with `ackoctl config use-context <name>` or per-call `--context`.
+
+## 6. Differences vs the prior MCP integration
+
+| Concern | Old (ACM MCP) | New (ackoctl) |
+|---------|---------------|---------------|
+| Bootstrap | `claude mcp add --transport http aerospike-<name> <url>` per cluster | `ackoctl config set-context <name>` per cluster |
+| Auth | bearer in `~/.claude/.mcp.json` (plaintext) | bearer in `~/.ackoctl/config.yaml` per context |
+| Server bind rules | DNS-rebinding allowlist, Origin allowlist, anonymous-on-localhost flag on the MCP HTTP server | none — there is no MCP HTTP server in cluster-manager any more |
+| Tool routing | `mcp__aerospike-<name>__<tool>` | `ackoctl --context=<name> <noun> <verb>` |
+| Mutation gating | server-side `READ_ONLY` profile blocks 11 tool names at call time | server-side workspace ACL + `--yes` confirmation flag on destructive verbs |
+| Tool count drift | session-bound, varied per ACM version (22 vs 27) | one CLI binary, version-pinned via `ackoctl version` |
+| Discovery | `tools/list` per prefix | `ackoctl --help`, `ackoctl <noun> --help` |
+
+The MCP HTTP server is gone, so the matching security surface (`ACM_MCP_*` env vars, allowlists, OIDC integration on the MCP path) is gone too. Authentication and ACL live entirely on the existing FastAPI surface that ackoctl talks to.
+
+## 7. Links
+
+- **ackoctl repo** — https://github.com/aerospike-ce-ecosystem/ackoctl
+- **ackoctl usage cheat sheet** — https://github.com/aerospike-ce-ecosystem/ackoctl/blob/main/docs/usage.md
+- **cluster-manager** — https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager
+- **cluster-manager REST docs** — `GET /api/openapi.json` on a running instance, or the cluster-manager repo's `docs/api/`.
+- **command reference** — [`./reference/commands.md`](./reference/commands.md)

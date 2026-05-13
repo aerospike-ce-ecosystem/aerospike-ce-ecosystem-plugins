@@ -49,41 +49,46 @@ claude plugin list
 | **aerospike-py-api** | "use aerospike-py to ..." | Full API reference — AsyncClient, CRUD, batch, CDT, query, expressions, observe, admin |
 | **aerospike-py-fastapi** | "build FastAPI app with Aerospike" | Production-ready FastAPI patterns — lifespan, DI, CRUD endpoints, error handling, metrics |
 
-### Cluster Manager MCP
+### Cluster Manager CLI (ackoctl)
 
 | Skill | Trigger | Description |
 |-------|---------|-------------|
-| **acm-mcp-init** | "register ACM MCP", "/acm-mcp-init" | Register one or many [aerospike-cluster-manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager) MCP endpoints with Claude Code so other skills can read and operate live clusters. Multi-cluster ACKO friendly. |
-| **acko-debugging** | "CrashLoopBackOff", "phase=Error", "reconcile failure", "migration stuck" | Systematic 6-step diagnosis procedure for ACKO clusters with CE 8.1 pitfalls and a remediation matrix. Routes both data-plane and K8s-plane probes through ACM MCP when registered (`list_namespaces`, `execute_info`, `query`, `list_k8s_clusters`, `get_k8s_pods`, `get_k8s_events`, `get_k8s_logs`); falls back to `kubectl`/`asinfo` otherwise. |
+| **ackoctl** | "ackoctl", "manage Aerospike connection", "browse records", "register UDF", "scale cluster" | Drive [aerospike-cluster-manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager) via the [ackoctl](https://github.com/aerospike-ce-ecosystem/ackoctl) CLI — connections, cluster info, records/sets, queries, secondary indexes, operator notes, raw asinfo, K8s AerospikeCluster CRs, admin (users/roles), and Lua UDF modules. Multi-cluster ACKO friendly via kubeconfig-style contexts. |
+| **acko-debugging** | "CrashLoopBackOff", "phase=Error", "reconcile failure", "migration stuck" | Systematic 6-step diagnosis procedure for ACKO clusters with CE 8.1 pitfalls and a remediation matrix. Routes both data-plane and K8s-plane probes through ackoctl (`ackoctl cluster info`, `ackoctl info exec`, `ackoctl query exec`, `ackoctl k8s cluster get/list`, `ackoctl k8s pod logs`, `ackoctl k8s events list`); falls back to `kubectl`/`asinfo` when ackoctl is unavailable. |
 
-## MCP integration
+## ackoctl integration
 
-This plugin uses the [aerospike-cluster-manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager) MCP server (27 tools at `/mcp` — 22 data-plane + 5 K8s-plane) for live cluster access. Endpoints are registered per cluster-manager instance — register one entry per ACKO Helm release if you operate multiple clusters.
-
-The plugin ships an **empty `.mcp.json`** by design: nothing auto-registers on install. Onboarding goes through the `acm-mcp-init` skill so the user explicitly chooses which URLs and tokens to wire up. This keeps the install surface minimal and avoids surprising users with a broken `localhost:8000` entry on machines that don't run ACM.
+Live cluster access goes through the [ackoctl](https://github.com/aerospike-ce-ecosystem/ackoctl) Go CLI, which calls [aerospike-cluster-manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager)'s REST API at `/api/v1/*`. There is no MCP HTTP server in the loop, so there is no DNS-rebinding allowlist, no Origin allowlist, and no per-cluster `claude mcp add` step — the security surface is just the existing cluster-manager FastAPI auth (bearer JWT + workspace ACL).
 
 ```bash
-# 1. Start ACM somewhere reachable
-ACM_MCP_ENABLED=true uv run uvicorn aerospike_cluster_manager_api.main:app --reload
+# 1. Install ackoctl
+curl -fsSL https://raw.githubusercontent.com/aerospike-ce-ecosystem/ackoctl/main/install.sh | sh
 
-# 2. Register the endpoint with Claude Code (or invoke the acm-mcp-init skill)
-claude mcp add --transport http aerospike-dev http://localhost:8000/mcp
+# 2. Point a context at a running cluster-manager
+ackoctl config set-context kind-local \
+  --server=http://localhost:8000/api \
+  --workspace-id=default
+ackoctl config use-context kind-local
 
 # 3. Use the cluster from any agent / chat
-#    "in dev cluster, list namespaces and get a sample record from sample_set"
+#    "in kind-local, list connections and get a sample record from sample_set"
+ackoctl connection list
+ackoctl record list <CONN_ID> --namespace=test --set=sample_set --page-size=5
 ```
 
-For multi-cluster ACKO, register each cluster-manager separately:
+For multi-cluster ACKO, register one context per cluster-manager instance — naming convention `<env>` or `<region>`:
 
 ```bash
-claude mcp add --transport http aerospike-prod-us \
-  https://acm.prod-us.example.com/mcp \
-  -H "Authorization: Bearer $ACM_MCP_TOKEN"
+ackoctl config set-context prod-us \
+  --server=https://acm.prod-us.example.com/api \
+  --token=$ACKOCTL_TOKEN \
+  --workspace-id=prod-us
+ackoctl --context=prod-us k8s cluster list
 ```
 
-Tools are addressable as `mcp__aerospike-<name>__<tool>` (e.g. `mcp__aerospike-prod-us__get_record`). Agents pick the right prefix from the user's wording ("in prod-us, …" → `aerospike-prod-us`).
+Auth is bearer-token only — users bring their own OIDC JWT (Keycloak CLI, browser device flow, …). The workspace ACL on cluster-manager scopes every call; destructive verbs (`delete`, `remove`, mutation `info exec --allow-write`, `k8s cluster scale`) require `--yes` for non-interactive runs.
 
-The default ACM access profile is `read_only` — mutation tools (`create_record`, `delete_*`, `truncate_set`, `execute_info` with config-set) are blocked at call time. Set `ACM_MCP_ACCESS_PROFILE=full` on the server to allow mutations.
+The `ackoctl` skill covers install, configuration, and every command (connection / cluster / set / record / query / index / note / k8s / info / admin / udf). See `skills/ackoctl/reference/commands.md` for a one-line-per-command cheat sheet.
 
 ## Prerequisites
 
