@@ -166,16 +166,6 @@ async def metrics():
 
 Or use the built-in server: `aerospike_py.start_metrics_server(port=9464)` in lifespan.
 
-## 7. Key Patterns
-
-- **Lifespan**: Create `AsyncClient` in lifespan, store on `app.state`, close on shutdown
-- **DI**: Use `Depends(get_client)` for every endpoint — never create client per-request
-- **Exceptions on module**: `aerospike_py.RecordNotFound` (NOT `aerospike_py.exception.RecordNotFound`)
-- **NamedTuple returns**: `record.bins`, `record.meta.gen` (NOT tuple unpacking)
-- **batch_read**: returns `dict[UserKey, AerospikeRecord]` — iterate with `.items()`, missing keys are absent
-- **batch_write**: inspect `BatchRecord.in_doubt` before retrying non-idempotent writes
-- **Health probe**: `await client.ping()` for readiness; trivial 200 OK for liveness
-- **Backpressure**: Set `max_concurrent_operations` to prevent connection pool exhaustion
-- **Exception name**: `AerospikeTimeoutError` (legacy `TimeoutError` alias removed)
+## 7. Reference
 
 Detail: `../aerospike-py-api/reference/client-config.md` | `../aerospike-py-api/reference/admin.md` | `../aerospike-py-api/reference/health.md` | `../aerospike-py-api/reference/write.md`
