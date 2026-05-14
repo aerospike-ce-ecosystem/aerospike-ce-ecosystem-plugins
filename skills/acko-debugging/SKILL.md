@@ -286,11 +286,4 @@ Always check for these CE 8.1-specific issues:
 5. **`nsup-period=0` with `default-ttl!=0`** — server fails to start.
 6. **Byte values as strings** — all sizes in `aerospikeConfig` must be integer bytes, not `"4G"` or `"1M"`.
 
-## Output format
-
-After completing the investigation, provide:
-
-1. **Root cause** — clear description of what is wrong.
-2. **Evidence** — the specific command output that shows the problem.
-3. **Fix** — step-by-step remediation commands the user can run.
-4. **Prevention** — how to avoid this issue in the future.
+Report the root cause with the command output that proves it, then the remediation commands.

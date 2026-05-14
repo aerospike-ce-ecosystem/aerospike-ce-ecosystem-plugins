@@ -13,20 +13,11 @@ Deploy Aerospike Community Edition clusters on Kubernetes using the ACKO operato
 
 ### Step 1: Check Prerequisites
 
-Run these commands to verify your environment is ready:
+The operator must be running and the CRD installed:
 
 ```bash
-# Verify kubectl is connected to a cluster
-kubectl cluster-info
-
-# Verify the ACKO operator is running
 kubectl get pods -n aerospike-operator -l control-plane=controller-manager
-
-# Verify the AerospikeCluster CRD is installed
 kubectl api-resources | grep aerospikeclusters
-
-# Create the target namespace (if it does not exist)
-kubectl create namespace aerospike --dry-run=client -o yaml | kubectl apply -f -
 ```
 
 If the operator is not running, install it first:
@@ -65,18 +56,10 @@ kubectl apply -f aerospike-basic.yaml
 ### Step 3: Verify Deployment
 
 ```bash
-# Wait for phase=Completed (typically 30-90 seconds)
+# phase=Completed typically takes 30-90s; pod naming is <cr-name>-<rack>-<idx>
 kubectl wait --for=jsonpath='{.status.phase}'=Completed asc/aerospike-basic -n aerospike --timeout=120s
-
-# Check cluster status (should show PHASE=Completed, HEALTH=1/1)
 kubectl get asc aerospike-basic -n aerospike
-
-# Check pod status (should show 1/1 Running)
-kubectl get pods -n aerospike
-
-# Verify Aerospike is responding
 kubectl exec -n aerospike aerospike-basic-0-0 -c aerospike-server -- asinfo -v status
-# Expected output: ok
 ```
 
 ---
@@ -149,7 +132,7 @@ Choose the scenario that matches your needs. Each links to a ready-to-use YAML e
 - **Use when**: You need to manually restart pods (warm via SIGUSR1, or full pod recreate) without changing spec
 - **Key features**: `spec.operations[]` with `WarmRestart` (SIGUSR1) or `PodRestart` (delete+recreate); optional `podList` to target specific pods; webhook prevents modifying the operations list while one is `InProgress`
 
-> **Monitoring sample note (`04-monitoring.yaml`)**: Recent fix — `metricLabels` values are TOML-escaped (double-quote-wrapped, backslash-escaped, control chars rejected) and the demo `emptyDir` mount points to `/opt/aerospike/work` instead of accidentally overlaying `/opt/aerospike`. If you cloned this example before April 2026, verify both.
+> **Monitoring sample note (`04-monitoring.yaml`)**: `metricLabels` values are TOML-escaped (double-quote-wrapped, backslash-escaped, control chars rejected); the demo `emptyDir` mounts at `/opt/aerospike/work`, not `/opt/aerospike`.
 
 ---
 
@@ -193,6 +176,6 @@ CE 8.1 notes: See acko-config-reference skill
 
 ---
 
-## 9. Template Fix Notice (April 2026)
+## 9. Template Notes
 
-A recent operator fix re-applies the resolved template to the in-memory cluster spec **after** every `Status().Update`/`Patch`, so template-derived fields (`PodSpec.PodAntiAffinity`, `Resources`, `Storage`) now reach the StatefulSet and persist across reconciles. If you previously worked around this by inlining template values into `spec.overrides`, you can drop those workarounds. `VolumeClaimTemplate` updates remain immutable — VCTs are only set at StatefulSet creation time inside `buildStatefulSet`.
+Template-derived fields (`PodSpec.PodAntiAffinity`, `Resources`, `Storage`) reach the StatefulSet and persist across reconciles — no need to inline template values into `spec.overrides`. `VolumeClaimTemplate` updates remain immutable (VCTs are set only at StatefulSet creation time).

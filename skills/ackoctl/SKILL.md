@@ -238,21 +238,7 @@ UDF registration is cluster-wide; the operator note (`ackoctl note record update
 - Auth is **bearer token only**. There is no `ackoctl login`; users bring their own OIDC JWT (Keycloak CLI, browser device flow, …) and store it in the context or pass it per-call via `--token` / `ACKOCTL_TOKEN`.
 - For multi-cluster ACKO, register one context per cluster-manager instance (`kind-local`, `prod-us`, `prod-eu`) and switch with `ackoctl config use-context <name>` or per-call `--context`.
 
-## 6. Differences vs the prior MCP integration
-
-| Concern | Old (ACM MCP) | New (ackoctl) |
-|---------|---------------|---------------|
-| Bootstrap | `claude mcp add --transport http aerospike-<name> <url>` per cluster | `ackoctl config set-context <name>` per cluster |
-| Auth | bearer in `~/.claude/.mcp.json` (plaintext) | bearer in `~/.ackoctl/config.yaml` per context |
-| Server bind rules | DNS-rebinding allowlist, Origin allowlist, anonymous-on-localhost flag on the MCP HTTP server | none — there is no MCP HTTP server in cluster-manager any more |
-| Tool routing | `mcp__aerospike-<name>__<tool>` | `ackoctl --context=<name> <noun> <verb>` |
-| Mutation gating | server-side `READ_ONLY` profile blocks 11 tool names at call time | server-side workspace ACL + `--yes` confirmation flag on destructive verbs |
-| Tool count drift | session-bound, varied per ACM version (22 vs 27) | one CLI binary, version-pinned via `ackoctl version` |
-| Discovery | `tools/list` per prefix | `ackoctl --help`, `ackoctl <noun> --help` |
-
-The MCP HTTP server is gone, so the matching security surface (`ACM_MCP_*` env vars, allowlists, OIDC integration on the MCP path) is gone too. Authentication and ACL live entirely on the existing FastAPI surface that ackoctl talks to.
-
-## 7. Links
+## 6. Links
 
 - **ackoctl repo** — https://github.com/aerospike-ce-ecosystem/ackoctl
 - **ackoctl usage cheat sheet** — https://github.com/aerospike-ce-ecosystem/ackoctl/blob/main/docs/usage.md
