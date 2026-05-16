@@ -13,7 +13,7 @@ pip install aerospike-py[otel]   # OpenTelemetry context propagation
 
 Wheels include Python 3.14 and 3.14t (free-threaded, `gil_used=true`).
 
-**Import note**: Rust/PyO3 extension. All exceptions and constants live on `aerospike_py` module directly (e.g., `aerospike_py.RecordNotFound`). No `aerospike_py.exception` submodule. Return types are NamedTuples — use `record.bins`, `record.meta.gen`. Type stubs: `src/aerospike_py/__init__.pyi`
+**Import note**: Rust/PyO3 extension. All exceptions are importable from `aerospike_py` directly (preferred) or from `aerospike_py.exception` (e.g., `from aerospike_py.exception import RecordNotFound`). Constants live on `aerospike_py` module directly (e.g., `aerospike_py.POLICY_EXISTS_CREATE_ONLY`). Return types are NamedTuples — use `record.bins`, `record.meta.gen`. Type stubs: `src/aerospike_py/__init__.pyi`
 
 ## 1. Client Setup
 

@@ -17,7 +17,7 @@ For routine reads (`ackoctl k8s cluster list`, `ackoctl record get`, …) the CL
 
 Prefer `ackoctl` for **both** planes. It goes through cluster-manager, which is the authoritative source for AerospikeCluster state (it normalises CR status fields, classifies K8s events, and enforces workspace ACL). Fall back to `kubectl` / direct `asinfo` only when `ackoctl` is unavailable, or when a field the cluster-manager summary does not surface yet is needed.
 
-- **Data plane** — `ackoctl cluster info`, `ackoctl info exec --command=...`, `ackoctl query exec`, `ackoctl record get`, `ackoctl set list`.
+- **Data plane** — `ackoctl cluster info`, `ackoctl info --command=...`, `ackoctl query exec`, `ackoctl record get`, `ackoctl set list`.
 - **K8s plane** — `ackoctl k8s cluster list / get / reconcile / scale`, `ackoctl k8s pod logs`, `ackoctl k8s events list`. Requires cluster-manager started with `K8S_MANAGEMENT_ENABLED=true`; if `ackoctl k8s cluster list` returns a 404, fall back to `kubectl` for the K8s plane.
 
 If `ackoctl` is not installed or no context is configured, tell the user:
@@ -46,7 +46,7 @@ These ackoctl invocations mutate cluster state. Always confirm with the user bef
 |---------|--------------|
 | `ackoctl record put` / `record delete` | Single-record write/delete |
 | `ackoctl cluster configure-namespace` | Runtime config change on the live cluster (`asinfo set-config`) |
-| `ackoctl info exec --allow-write` | Raw asinfo with mutation verbs (`set-config:`, `recluster:`) |
+| `ackoctl info --allow-write` | Raw asinfo with mutation verbs (`set-config:`, `recluster:`) |
 | `ackoctl index create` / `index delete` | Server-side index DDL |
 | `ackoctl k8s cluster scale` | Patches `spec.size` on the AerospikeCluster CR — same blast radius as `kubectl patch` |
 | `ackoctl k8s cluster reconcile` | Stamps `acko.io/force-reconcile`; triggers operator reconciliation |
@@ -54,7 +54,7 @@ These ackoctl invocations mutate cluster state. Always confirm with the user bef
 | `ackoctl admin user/role *` | Identity changes (security-enabled clusters only) |
 | `ackoctl connection delete` | Removes the profile **and** cascades all attached notes |
 
-For diagnostic reads, prefer the no-side-effect verbs: `ackoctl k8s cluster get`, `ackoctl info exec` without `--allow-write` (whitelisted read verbs only), `ackoctl query exec`, `ackoctl record get`.
+For diagnostic reads, prefer the no-side-effect verbs: `ackoctl k8s cluster get`, `ackoctl info` without `--allow-write` (whitelisted read verbs only), `ackoctl query exec`, `ackoctl record get`.
 
 ## Debugging procedure
 
@@ -77,8 +77,8 @@ Then run discovery against the selected `CONN_ID`:
 
 ```bash
 ackoctl --context={ctx} cluster info <CONN_ID> -o yaml
-ackoctl --context={ctx} info exec  <CONN_ID> --command='statistics'
-ackoctl --context={ctx} info exec  <CONN_ID> --command='status'
+ackoctl --context={ctx} info <CONN_ID> --command='statistics'
+ackoctl --context={ctx} info <CONN_ID> --command='status'
 ```
 
 Use `statistics` output to see `cluster_size`, `migration_status`, `stop_writes`, etc. across all nodes. `cluster info` already aggregates nodes, namespaces, sets and sindex counts.
@@ -132,7 +132,7 @@ kubectl get asc <name> -n <ns> -o jsonpath='{.status.migrationStatus}' | jq .
 # Per-pod migration partitions
 kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods}' | jq 'to_entries[] | {pod: .key, migrating: .value.migratingPartitions}'
 # Direct asinfo check via ackoctl
-ackoctl --context={ctx} info exec <CONN_ID> --command='statistics' | tr ';' '\n' | grep migrate
+ackoctl --context={ctx} info <CONN_ID> --command='statistics' | tr ';' '\n' | grep migrate
 ```
 
 This is usually normal during scale-down. Report `migrationStatus.remainingPartitions` progress and advise waiting.
@@ -157,9 +157,9 @@ Check for:
 
 ```bash
 # Status, statistics, namespace details — per-node where useful.
-ackoctl --context={ctx} info exec <CONN_ID> --command='status'
-ackoctl --context={ctx} info exec <CONN_ID> --command='statistics'
-ackoctl --context={ctx} info exec <CONN_ID> --command='namespace/<ns-name>'
+ackoctl --context={ctx} info <CONN_ID> --command='status'
+ackoctl --context={ctx} info <CONN_ID> --command='statistics'
+ackoctl --context={ctx} info <CONN_ID> --command='namespace/<ns-name>'
 # Sample-record sanity check
 ackoctl --context={ctx} query exec <CONN_ID> --namespace=<ns-name> --set=<set> --max-records=5
 # Filtered probe — useful for narrowing in on records that match a suspected
