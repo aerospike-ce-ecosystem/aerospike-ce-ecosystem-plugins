@@ -179,7 +179,7 @@ ackoctl k8s cluster list                                 # all AerospikeCluster 
 ackoctl k8s cluster get aerospike/sample-cluster         # <namespace>/<name>
 ackoctl k8s cluster reconcile aerospike/sample-cluster   # stamp acko.io/force-reconcile
 ackoctl k8s cluster scale aerospike/sample-cluster --size=5
-ackoctl k8s pod logs aerospike/sample-cluster --pod=sample-cluster-0-0 \
+ackoctl k8s cluster logs aerospike/sample-cluster --pod=sample-cluster-0-0 \
   --container=aerospike-server --since=5m --tail=200
 ackoctl k8s events list aerospike/sample-cluster --since=30m
 ```
@@ -224,10 +224,9 @@ The target cluster must have security enabled in `aerospike.conf`. CE clusters m
 ### udf — Lua UDF module management
 
 ```bash
-ackoctl udf list     <CONN_ID>
-ackoctl udf register <CONN_ID> --file=./examples/sum.lua --name=sum.lua
-ackoctl udf get      <CONN_ID> --name=sum.lua -o yaml          # source + metadata
-ackoctl udf remove   <CONN_ID> --name=sum.lua --yes
+ackoctl udf list   <CONN_ID>
+ackoctl udf upload <CONN_ID> --file=./examples/sum.lua
+ackoctl udf remove <CONN_ID> --filename=sum.lua --yes
 ```
 
 UDF registration is cluster-wide; the operator note (`ackoctl note record update`) is the right place to record provenance / ticket links for the module.
