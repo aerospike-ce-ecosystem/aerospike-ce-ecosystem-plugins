@@ -1,6 +1,6 @@
 ---
 name: acko-deploy
-description: "MUST USE for deploying Aerospike on Kubernetes. Contains CE-specific YAML templates, validated AerospikeCluster CR examples, and critical constraints that prevent enterprise-only config mistakes (feature-key-file, security sections crash CE pods). Without this skill, deployments fail on first attempt due to CE 8.1 breaking changes (data-size not memory-size, no info port 3003) or webhook map/list shape rules (service/network must be maps; logging must be a list). Triggers on: deploy/create/set up Aerospike on K8s, kind, minikube, EKS, GKE; AerospikeCluster CR; ACKO operator; spec.operations / WarmRestart / PodRestart YAML; NoSQL database on Kubernetes. 9 ready-to-use YAML examples from minimal single-node to full-featured multi-rack."
+description: "MUST USE for deploying Aerospike on Kubernetes. Contains CE-specific YAML templates, validated AerospikeCluster CR examples, and critical constraints that prevent enterprise-only config mistakes (feature-key-file, security sections crash CE pods). Without this skill, deployments fail on first attempt due to CE 8.1 breaking changes (data-size not memory-size, no info port 3003) or webhook map/list shape rules (service/network must be maps; logging must be a list). Triggers on: deploy/create/set up Aerospike on K8s, kind, minikube, EKS, GKE; AerospikeCluster CR; ACKO operator; helm install the ACKO operator / Cluster Manager UI / embedded PostgreSQL; spec.operations / WarmRestart / PodRestart YAML; NoSQL database on Kubernetes. 9 ready-to-use YAML examples from minimal single-node to full-featured multi-rack."
 ---
 
 # ACKO Deployment Guide
@@ -11,7 +11,7 @@ Deploy Aerospike Community Edition clusters on Kubernetes using the ACKO operato
 
 ## 1. Quick Deploy: 1-Node Dev Cluster in 3 Steps
 
-### Step 1: Check Prerequisites
+### Step 1: Check Prerequisites — or Install the Operator
 
 The operator must be running and the CRD installed:
 
@@ -20,10 +20,32 @@ kubectl get pods -n aerospike-operator -l control-plane=controller-manager
 kubectl api-resources | grep aerospikeclusters
 ```
 
-If the operator is not running, install it first:
+**Installing the operator (Helm).** ACKO ships as an OCI Helm chart that bundles the operator + webhook, the Cluster Manager UI (`api` + `web` Deployments), and an embedded `postgres:17-alpine` sidecar — all enabled by default. cert-manager must be installed first (it provisions the webhook TLS certificate):
+
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/main/config/deploy/operator.yaml
+helm repo add jetstack https://charts.jetstack.io && helm repo update jetstack
+helm install cert-manager jetstack/cert-manager -n cert-manager \
+  --create-namespace --set crds.enabled=true --wait
+
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  -n aerospike-operator --create-namespace
 ```
+
+The UI's PostgreSQL sidecar runs inside the `api` pod with a 1Gi PVC — it stores cluster connection metadata, not Aerospike data. Reach the UI (the web frontend listens on 3100):
+
+```bash
+kubectl -n aerospike-operator port-forward svc/acko-aerospike-ce-kubernetes-operator-ui-web 3100:3100
+```
+
+Common install variants:
+
+| Goal | Flags |
+|------|-------|
+| Operator only, no UI | `--set ui.api.enabled=false --set ui.web.enabled=false` |
+| External PostgreSQL (production) | `--set ui.postgresql.enabled=false --set ui.env.databaseUrl="postgresql://user:pass@host:5432/aerospike_manager"` |
+| CRDs managed separately (GitOps) | `--set crds.install=false` |
+
+The embedded PostgreSQL sidecar is single-instance and **incompatible with HPA** — for production use an external managed database (RDS / Cloud SQL / AlloyDB) via `ui.env.databaseUrl`, or pass credentials through `ui.postgresql.existingSecret`. Full value reference: ACKO docs → Reference → Helm Values.
 
 ### Step 2: Apply the Minimal CR
 
