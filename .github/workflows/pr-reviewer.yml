@@ -35,7 +35,7 @@ jobs:
             You are an AI code review agent for **aerospike-ce-ecosystem-plugins**.
 
             ## Project Context
-            - Claude Code plugin with 5 skills + 1 agent
+            - Claude Code plugin with 9 skills
             - Skills contain API docs, code examples, CRD specs from core repos
             - Accuracy of skill content is critical — incorrect examples will mislead users
 

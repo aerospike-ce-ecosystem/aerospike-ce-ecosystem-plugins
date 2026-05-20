@@ -96,8 +96,8 @@ ackoctl connection health <ID>     # live probe — always returns 200; see `con
 ackoctl cluster info <CONN_ID> -o yaml
 ackoctl cluster configure-namespace <CONN_ID> \
   --name=test \
-  --param=high-water-disk-pct=70 \
-  --param=stop-writes-pct=90
+  --param=evict-used-pct=70 \
+  --param=stop-writes-sys-memory-pct=90
 ```
 
 `configure-namespace` issues `asinfo set-config` under the hood — only **runtime-mutable** namespace knobs apply. Aerospike CE cannot create namespaces at runtime: those live in `aerospike.conf` (managed by ACKO).

@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "aerospike-ce-ecosystem",
-      "description": "Aerospike CE ecosystem tools: deploy clusters on Kubernetes with ACKO, build Python apps with aerospike-py",
+      "description": "Aerospike CE ecosystem tools: deploy, operate, and debug clusters on Kubernetes with ACKO; drive cluster-manager via the ackoctl CLI; build Python apps with aerospike-py.",
       "source": "./",
       "category": "development"
     }
