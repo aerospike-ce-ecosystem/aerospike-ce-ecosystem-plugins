@@ -41,6 +41,7 @@ claude plugin list
 | **acko-deploy** | "deploy Aerospike on Kubernetes" | Step-by-step guide to deploy CE clusters via AerospikeCluster CR — 8 scenarios from minimal to full-featured |
 | **acko-operations** | "scale Aerospike cluster" | Day-2 operations: scale, upgrade, dynamic config, warm restart, ACL, pause/resume, troubleshooting |
 | **acko-config-reference** | *(background)* | CE 8.1 parameter reference, CRD-to-conf mapping, webhook validation rules |
+| **acko-e2e-test** | "ACKO e2e test", "kind cluster test" | End-to-end test playbook — canonical scenarios, Ginkgo labels, mandatory `helm install` operator setup, release-verification performance checks |
 
 ### aerospike-py (Python Client)
 
@@ -54,7 +55,13 @@ claude plugin list
 | Skill | Trigger | Description |
 |-------|---------|-------------|
 | **ackoctl** | "ackoctl", "manage Aerospike connection", "browse records", "register UDF", "scale cluster" | Drive [aerospike-cluster-manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager) via the [ackoctl](https://github.com/aerospike-ce-ecosystem/ackoctl) CLI — connections, cluster info, records/sets, queries, secondary indexes, operator notes, raw asinfo, K8s AerospikeCluster CRs, admin (users/roles), and Lua UDF modules. Multi-cluster ACKO friendly via kubeconfig-style contexts. |
-| **acko-debugging** | "CrashLoopBackOff", "phase=Error", "reconcile failure", "migration stuck" | Systematic 6-step diagnosis procedure for ACKO clusters with CE 8.1 pitfalls and a remediation matrix. Routes both data-plane and K8s-plane probes through ackoctl (`ackoctl cluster info`, `ackoctl info exec`, `ackoctl query exec`, `ackoctl k8s cluster get/list`, `ackoctl k8s pod logs`, `ackoctl k8s events list`); falls back to `kubectl`/`asinfo` when ackoctl is unavailable. |
+| **acko-debugging** | "CrashLoopBackOff", "phase=Error", "reconcile failure", "migration stuck" | Systematic 6-step diagnosis procedure for ACKO clusters with CE 8.1 pitfalls and a remediation matrix. Routes both data-plane and K8s-plane probes through ackoctl (`ackoctl cluster info`, `ackoctl info`, `ackoctl query exec`, `ackoctl k8s cluster get/list`, `ackoctl k8s cluster logs`, `ackoctl k8s events list`); falls back to `kubectl`/`asinfo` when ackoctl is unavailable. |
+
+### Ecosystem support
+
+| Skill | Trigger | Description |
+|-------|---------|-------------|
+| **bug-reporter** | "버그 제보", "where do I file this issue", "report this to GitHub" | Routes a bug report to the correct `aerospike-ce-ecosystem` repo by symptom and generates a ready-to-paste GitHub issue body with the required reproduction context |
 
 ## ackoctl integration
 
@@ -70,7 +77,7 @@ ackoctl config set-context kind-local \
   --workspace-id=default
 ackoctl config use-context kind-local
 
-# 3. Use the cluster from any agent / chat
+# 3. Use the cluster from any skill or chat
 #    "in kind-local, list connections and get a sample record from sample_set"
 ackoctl connection list
 ackoctl record list <CONN_ID> --namespace=test --set=sample_set --page-size=5
@@ -86,7 +93,7 @@ ackoctl config set-context prod-us \
 ackoctl --context=prod-us k8s cluster list
 ```
 
-Auth is bearer-token only — users bring their own OIDC JWT (Keycloak CLI, browser device flow, …). The workspace ACL on cluster-manager scopes every call; destructive verbs (`delete`, `remove`, mutation `info exec --allow-write`, `k8s cluster scale`) require `--yes` for non-interactive runs.
+Auth is bearer-token only — users bring their own OIDC JWT (Keycloak CLI, browser device flow, …). The workspace ACL on cluster-manager scopes every call; destructive verbs (`delete`, `remove`, mutation `info --allow-write`, `k8s cluster scale`) require `--yes` for non-interactive runs.
 
 The `ackoctl` skill covers install, configuration, and every command (connection / cluster / set / record / query / index / note / k8s / info / admin / udf). See `skills/ackoctl/reference/commands.md` for a one-line-per-command cheat sheet.
 

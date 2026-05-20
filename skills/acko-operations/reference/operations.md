@@ -64,8 +64,8 @@ spec:
       proto-fd-max: 20000               # Dynamic parameter
     namespaces:
       - name: test
-        high-water-memory-pct: 70       # Dynamic parameter (CE 7.x)
-        stop-writes-pct: 90             # Dynamic parameter (CE 7.x)
+        evict-used-pct: 70              # Dynamic parameter (CE 8.1)
+        stop-writes-sys-memory-pct: 90  # Dynamic parameter (CE 8.1)
 ```
 
 The operator applies dynamic changes via 2-phase commit (April 2026+):

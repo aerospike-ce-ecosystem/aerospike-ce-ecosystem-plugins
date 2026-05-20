@@ -34,10 +34,9 @@ jobs:
             You are an AI implementation agent for the **aerospike-ce-ecosystem-plugins** project.
 
             ## Project Context
-            - **Structure**: Claude Code plugin with skills and agents
-              - `skills/` — 5 skills (acko-deploy, acko-operations, acko-config-reference, aerospike-py-api, aerospike-py-fastapi)
-              - `agents/` — 1 agent (acko-cluster-debugger)
-              - Each skill has `SKILL.md` (main content) and `reference/` directory (detailed docs)
+            - **Structure**: Claude Code plugin with skills
+              - `skills/` — 9 skills (acko-config-reference, acko-debugging, acko-deploy, acko-e2e-test, acko-operations, ackoctl, aerospike-py-api, aerospike-py-fastapi, bug-reporter)
+              - Each skill has `SKILL.md` (main content); most also have a `reference/` directory (detailed docs)
             - **Content type**: Markdown-based skill files with embedded code examples, API signatures, CRD specs
             - **Core repo references**:
               - aerospike-py: API signatures (`__init__.pyi`), exceptions (`errors.rs`), constants

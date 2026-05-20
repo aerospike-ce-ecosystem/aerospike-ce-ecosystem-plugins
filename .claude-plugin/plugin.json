@@ -1,7 +1,7 @@
 {
   "name": "aerospike-ce-ecosystem",
   "version": "1.4.1",
-  "description": "Aerospike CE ecosystem tools: deploy clusters on Kubernetes with ACKO operator, build Python apps with aerospike-py (Rust/PyO3 async client). Skills for deployment, Day-2 operations, troubleshooting, API reference, and FastAPI integration.",
+  "description": "Aerospike CE ecosystem tools for Claude Code: deploy, operate, and debug clusters on Kubernetes with the ACKO operator; drive aerospike-cluster-manager via the ackoctl CLI; and build Python apps with aerospike-py (Rust/PyO3 async client). 9 skills spanning deployment, Day-2 operations, debugging, e2e testing, CLI usage, API reference, FastAPI integration, and bug routing.",
   "author": {
     "name": "Aerospike CE Ecosystem",
     "email": "kimsoungryoul@gmail.com"

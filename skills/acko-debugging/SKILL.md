@@ -18,7 +18,7 @@ For routine reads (`ackoctl k8s cluster list`, `ackoctl record get`, …) the CL
 Prefer `ackoctl` for **both** planes. It goes through cluster-manager, which is the authoritative source for AerospikeCluster state (it normalises CR status fields, classifies K8s events, and enforces workspace ACL). Fall back to `kubectl` / direct `asinfo` only when `ackoctl` is unavailable, or when a field the cluster-manager summary does not surface yet is needed.
 
 - **Data plane** — `ackoctl cluster info`, `ackoctl info --command=...`, `ackoctl query exec`, `ackoctl record get`, `ackoctl set list`.
-- **K8s plane** — `ackoctl k8s cluster list / get / reconcile / scale`, `ackoctl k8s pod logs`, `ackoctl k8s events list`. Requires cluster-manager started with `K8S_MANAGEMENT_ENABLED=true`; if `ackoctl k8s cluster list` returns a 404, fall back to `kubectl` for the K8s plane.
+- **K8s plane** — `ackoctl k8s cluster list / get / reconcile / scale`, `ackoctl k8s cluster logs`, `ackoctl k8s events list`. Requires cluster-manager started with `K8S_MANAGEMENT_ENABLED=true`; if `ackoctl k8s cluster list` returns a 404, fall back to `kubectl` for the K8s plane.
 
 If `ackoctl` is not installed or no context is configured, tell the user:
 
@@ -50,7 +50,7 @@ These ackoctl invocations mutate cluster state. Always confirm with the user bef
 | `ackoctl index create` / `index delete` | Server-side index DDL |
 | `ackoctl k8s cluster scale` | Patches `spec.size` on the AerospikeCluster CR — same blast radius as `kubectl patch` |
 | `ackoctl k8s cluster reconcile` | Stamps `acko.io/force-reconcile`; triggers operator reconciliation |
-| `ackoctl udf register` / `udf remove` | Cluster-wide UDF module change |
+| `ackoctl udf upload` / `udf remove` | Cluster-wide UDF module change |
 | `ackoctl admin user/role *` | Identity changes (security-enabled clusters only) |
 | `ackoctl connection delete` | Removes the profile **and** cascades all attached notes |
 
@@ -90,7 +90,7 @@ ackoctl --context={ctx} k8s cluster list                                        
 ackoctl --context={ctx} k8s cluster list --workspace=<ws>                           # explicit workspace filter
 ackoctl --context={ctx} k8s cluster get <ns>/<name> -o yaml                         # phase, size, conditions, dynamicConfigStatus
 ackoctl --context={ctx} k8s events list <ns>/<name> --since=30m                     # classified events
-ackoctl --context={ctx} k8s pod logs <ns>/<name> --pod=<pod> --container=aerospike-server --since=5m --tail=200
+ackoctl --context={ctx} k8s cluster logs <ns>/<name> --pod=<pod> --container=aerospike-server --since=5m --tail=200
 ```
 
 The CR phase, size, conditions, and migration status are all in the `k8s cluster get` payload — no need to shell out for every field.
@@ -201,8 +201,8 @@ For any pods not in `Running` state — prefer ackoctl, fall back to kubectl:
 
 ```bash
 # ackoctl path
-ackoctl --context={ctx} k8s pod logs <ns>/<name> --pod=<pod> --container=aerospike-server --since=10m --tail=200
-ackoctl --context={ctx} k8s pod logs <ns>/<name> --pod=<pod> --container=aerospike-server --previous   # if CrashLoopBackOff
+ackoctl --context={ctx} k8s cluster logs <ns>/<name> --pod=<pod> --container=aerospike-server --since=10m --tail=200
+ackoctl --context={ctx} k8s cluster logs <ns>/<name> --pod=<pod> --container=aerospike-server --previous   # if CrashLoopBackOff
 
 # kubectl fallback
 kubectl describe pod <pod> -n <ns>

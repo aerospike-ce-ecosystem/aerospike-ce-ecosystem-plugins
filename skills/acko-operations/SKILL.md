@@ -121,7 +121,6 @@ kubectl patch asc <name> -n <ns> --type=merge \
 - `proto-fd-max`
 - `max-record-size`
 - `stop-writes-sys-memory-pct`
-- `high-water-memory-pct` (CE 7.x; replaced in 8.1)
 - `evict-used-pct`
 - `evict-tenths-pct`
 - `nsup-period`
