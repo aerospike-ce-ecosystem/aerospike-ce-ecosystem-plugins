@@ -29,7 +29,7 @@ Per-release notes are also auto-published to [GitHub Releases](https://github.co
 
 - Skills — corrected `ackoctl` verbs/flags and added an `aerospike-py` import note (#35).
 
-## [1.4.3] - 2026-05-14
+## [1.4.3] - 2026-05-15
 
 ### Changed
 
@@ -63,7 +63,7 @@ Per-release notes are also auto-published to [GitHub Releases](https://github.co
 
 - Retired the `acm-mcp-init` skill and the cluster-manager MCP HTTP server integration; `ackoctl` provides equivalent coverage (#27).
 
-## [1.3.1] - 2026-05-09
+## [1.3.1] - 2026-05-08
 
 ### Changed
 
@@ -73,7 +73,7 @@ Per-release notes are also auto-published to [GitHub Releases](https://github.co
 
 - The `agents/` directory — the plugin no longer ships agents (#21).
 
-## [1.3.0] - 2026-05-08
+## [1.3.0] - 2026-05-07
 
 ### Added
 
@@ -95,10 +95,12 @@ Per-release notes are also auto-published to [GitHub Releases](https://github.co
 
 ## [1.2.0] - 2026-05-04
 
-### Added
+### Changed
 
 - **Skills**:
   - `acko-e2e-test` — Hybrid pytest rewrite: Python for assertions, bash for CLI orchestration. Tightens release-verification scenarios and reduces flakiness on the CLI orchestration boundary (PR #10).
+- **Skill updates**:
+  - `aerospike-py-api` — added a PK regex filter scan guide and `REGEX_*` constants (PR #11); cross-linked the Secondary Index alternative from the PK regex notes (PR #14).
 
 ### CI/CD
 
