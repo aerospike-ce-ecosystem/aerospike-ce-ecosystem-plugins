@@ -4,6 +4,8 @@ Prometheus metrics emitted by the ACKO controller process (not the Aerospike ser
 
 The operator exposes metrics on the standard `controller-runtime` `/metrics` endpoint (default `:8080/metrics` in the `aerospike-operator` namespace).
 
+When `observability.otel.enabled` is set on the Helm chart, this same registry is **also** pushed to an OTLP collector (bridged from Prometheus) — `/metrics` scraping and OTLP push run side by side. See acko-operations §16.
+
 > Catalog verified against `aerospike-ce-kubernetes-operator/internal/metrics/metrics.go`. Every metric below is registered with the listed labels.
 
 ---
