@@ -2,6 +2,15 @@
 
 Compact one-line-per-verb enumeration. Use this when constructing a precise `ackoctl` invocation — the SKILL.md prose covers semantics; this file covers exact verbs and flags. Grammar is uniform: `ackoctl <noun> <verb> [POSITIONAL] [--flag value]`. Default output is `-o table`; `-o json|yaml` is always available.
 
+## `guide` — operational guides (read org/team policy first)
+
+Read-only. **Run `guide get` before any mutating command** and follow the policy it states — data-plane guide before record/set/index/note writes, control-plane guide before connection/cluster/admin operations.
+
+| Verb | One-liner |
+|------|-----------|
+| `guide list` | List the guides registered for the workspace (data-plane, control-plane). |
+| `guide get data-plane\|control-plane [--workspace WS]` | Print one guide; default output is the raw Markdown body, `-o json\|yaml` is structured. |
+
 ## `config` — context management (kubeconfig-style)
 
 | Verb | One-liner |

@@ -1,6 +1,6 @@
 ---
 name: ackoctl
-description: "MUST USE when the user drives Aerospike clusters via the ackoctl CLI — connections, records/sets/queries, secondary indexes, operator notes, raw asinfo, K8s AerospikeCluster CRs (list/get/scale/logs/events/pods/reconcile), admin users/roles, and Lua UDFs. Triggers on: ackoctl, manage Aerospike connection, browse records, run query, scale cluster, register UDF, create Aerospike user. Replaces the retired ACM MCP server — canonical way to drive cluster-manager from Claude Code."
+description: "MUST USE when the user drives Aerospike clusters via the ackoctl CLI — connections, records/sets/queries, secondary indexes, operator notes, operational guides, raw asinfo, K8s AerospikeCluster CRs (list/get/scale/logs/events/pods/reconcile), admin users/roles, and Lua UDFs. ALWAYS read the workspace's data-plane / control-plane operational guide with `ackoctl guide get` before running any data or cluster operation, and follow the org/team policy it states. Triggers on: ackoctl, ackoctl guide, manage Aerospike connection, browse records, run query, scale cluster, register UDF, create Aerospike user, read operational guide. Replaces the retired ACM MCP server — canonical way to drive cluster-manager from Claude Code."
 ---
 
 # ackoctl — cluster-manager CLI for Claude Code
@@ -10,6 +10,51 @@ description: "MUST USE when the user drives Aerospike clusters via the ackoctl C
 This skill replaces the legacy `acm-mcp-init` skill. The MCP HTTP server inside cluster-manager has been retired in favor of the CLI: there is **no `claude mcp add`**, no DNS-rebinding allowlist, and no Origin allowlist — the security surface shrank because there is no MCP HTTP server. Claude shells out to `ackoctl` like it would to `kubectl` or `gh`.
 
 When in doubt about a specific invocation, consult [`./reference/commands.md`](./reference/commands.md).
+
+## 0. Read the operational guides first — mandatory
+
+Operational guides are workspace-scoped Markdown policy documents that acko
+administrators register in cluster-manager. They are the **authoritative
+org/team policy** for what may be done with Aerospike data and clusters —
+TTL ceilings for throwaway data, required `note` templates, which environments
+may be created and how, approval gates, and so on.
+
+**Before running any mutating `ackoctl` command, read the relevant guide and
+follow it.** This is not optional — the guides exist so an administrator can
+control data and cluster operations dynamically, server-side, without changing
+this skill.
+
+| Before you run … | First read |
+|---|---|
+| `record put/delete`, `set truncate`, `index create/delete`, `note …`, `cluster configure-namespace`, mutating `query` | `ackoctl guide get data-plane` |
+| `connection create/update/delete`, `k8s cluster create/scale/delete/reconcile`, `info … --allow-write`, `admin user/role …` | `ackoctl guide get control-plane` |
+
+```bash
+ackoctl guide list                # which guides the workspace has registered
+ackoctl guide get data-plane      # policy for Aerospike data CRUD
+ackoctl guide get control-plane   # policy for Aerospike cluster lifecycle
+```
+
+Workflow every time:
+
+1. Decide whether the task touches the **data plane** (records / sets /
+   indexes / notes) or the **control plane** (connections / clusters / admin).
+2. Run `ackoctl guide get <data-plane|control-plane>` for the active workspace
+   and read the returned Markdown **in full**.
+3. Apply every policy it states. Example data-plane policy: "temporary test
+   data must set TTL ≤ 7 days and carry a `note` using the template
+   `creator: … / date: …`". Example control-plane policy: "test clusters must
+   be created in-memory only; stage uses the `soft-rack` template; prod is not
+   created directly — get approval first".
+4. Only then run the ackoctl command(s). If the guide forbids or constrains the
+   request, surface that to the user before acting.
+
+If `ackoctl guide get …` returns **404** the guide is not registered yet — tell
+the user, proceed with standard caution, and do **not** invent a policy.
+
+Guides are authored and edited by administrators in the cluster-manager web UI
+under **Operational guides** (`/guides`). See [§4 `guide`](#guide--operational-guides-orgteam-policy)
+for the read-only CLI surface.
 
 ## 1. Install
 
@@ -74,6 +119,27 @@ gh / aws / kubectl style: `ackoctl connection list`, not `ackoctl get connection
 For lists and gets, default to `-o table` for human consumption and switch to `-o json` / `-o yaml` whenever Claude needs to parse the output downstream.
 
 ## 4. Commands by noun
+
+### guide — operational guides (org/team policy)
+
+Read-only access to the workspace's operational guides. **Run these before any
+data or cluster operation** — see [§0](#0-read-the-operational-guides-first--mandatory).
+
+```bash
+ackoctl guide list                              # guides registered for the workspace (data-plane and/or control-plane)
+ackoctl guide get data-plane                    # prints the Markdown policy body
+ackoctl guide get control-plane
+ackoctl guide get data-plane --workspace=ws-team-a
+ackoctl guide get control-plane -o json         # structured: title, timestamps, author
+```
+
+`guide get` prints the raw Markdown to stdout under the default output (easy to
+read and pipe); `-o json` / `-o yaml` emit the full structured guide. The
+workspace comes from `--workspace` or the current context; **unlike other
+resource commands**, `guide` falls back to the built-in `ws-default` workspace
+when neither is set (it does not error out) — `ws-default` always exists and is
+readable by every authenticated caller. Guides are authored in the
+cluster-manager web UI — there is no `guide create/edit` verb in ackoctl.
 
 ### connection — Aerospike connection profiles
 
