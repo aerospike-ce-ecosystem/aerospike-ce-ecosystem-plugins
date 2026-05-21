@@ -26,7 +26,7 @@ bash scripts/bootstrap.sh --check   # status only — install nothing
 bash scripts/bootstrap.sh --no-operator   # don't auto-clone the operator repo
 ```
 
-The operator repo is discovered automatically — `helpers/env.py` tries (in order): `$OPERATOR_REPO`, the workspace-sibling layout (`asc-workspace/aerospike-ce-kubernetes-operator`), `$CWD/aerospike-ce-kubernetes-operator`, `~/aerospike-ce-kubernetes-operator`, `~/github/aerospike-ce-kubernetes-operator`, `/workspace/aerospike-ce-kubernetes-operator`. If none exist, fixtures `pytest.skip()` with a clear message — no hard import-time failure.
+The operator repo is discovered automatically — `helpers/env.py` tries (in order): `$OPERATOR_REPO`, the workspace-sibling layout (`<workspace>/aerospike-ce-kubernetes-operator`), `$CWD/aerospike-ce-kubernetes-operator`, `~/aerospike-ce-kubernetes-operator`, `~/github/aerospike-ce-kubernetes-operator`, `/workspace/aerospike-ce-kubernetes-operator`. If none exist, fixtures `pytest.skip()` with a clear message — no hard import-time failure.
 
 ## How to run
 
