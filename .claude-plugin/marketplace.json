@@ -1,5 +1,6 @@
 {
   "name": "aerospike-ce-ecosystem",
+  "description": "Aerospike CE ecosystem tools for Kubernetes operator deployment, operations, end-to-end testing, and Python application development.",
   "owner": {
     "name": "Aerospike CE Ecosystem",
     "email": "kimsoungryoul@gmail.com"

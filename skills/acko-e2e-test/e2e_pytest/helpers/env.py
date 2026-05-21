@@ -41,7 +41,7 @@ CERT_MANAGER_VERSION = _env("CERT_MANAGER_VERSION", "v1.19.3")
 # Paths — operator repo and chart.
 # Discovery order (first existing dir wins):
 #   1. $OPERATOR_REPO env var
-#   2. asc-workspace sibling layout (this plugin under asc-workspace/aerospike-ce-ecosystem-plugins)
+#   2. workspace sibling layout (this plugin under a shared workspace directory)
 #   3. CWD/aerospike-ce-kubernetes-operator (run from a parent dir that holds both)
 #   4. ~/aerospike-ce-kubernetes-operator (cloned to home)
 #   5. ~/github/aerospike-ce-kubernetes-operator (the default ~/github/<repo> layout)
@@ -55,7 +55,7 @@ def _discover_operator_repo() -> Path:
         return Path(explicit).expanduser()
 
     here = Path(__file__).resolve()
-    # parents: helpers, e2e_pytest, acko-e2e-test, skills, aerospike-ce-ecosystem-plugins, asc-workspace
+    # parents: helpers, e2e_pytest, acko-e2e-test, skills, plugin repo, shared workspace
     workspace_sibling = here.parents[5] / "aerospike-ce-kubernetes-operator"
 
     candidates = [
