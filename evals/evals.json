@@ -78,6 +78,12 @@
       "prompt": "cluster-manager UI에서 Record browser 페이지가 500을 내는데 어디 repo에 이슈 올려야 돼?",
       "expected_output": "bug-reporter skill triggers; routes to aerospike-cluster-manager repo (https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/issues/new); asks for browser+version, the failing URL path, browser console error, failing Network tab request/response, and screenshot or /api/v1/version output",
       "files": []
+    },
+    {
+      "id": 14,
+      "prompt": "ackoctl로 test 네임스페이스 users set에 임시 레코드 하나 넣어줘.",
+      "expected_output": "ackoctl skill triggers; recognizes a data-plane write; runs ackoctl guide get data-plane FIRST to read the workspace operational policy before any record put; follows the policy it returns (e.g. caps test-data TTL at 7 days, attaches a note using the creator/date template); then runs ackoctl record put with the policy-compliant flags; if the data-plane guide returns 404 it tells the user no guide is registered and proceeds with standard caution rather than inventing a policy",
+      "files": []
     }
   ]
 }
