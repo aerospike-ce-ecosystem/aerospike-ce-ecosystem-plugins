@@ -386,6 +386,29 @@ Detail: `./reference/diagnostic-commands.md`
 
 ---
 
+## 16. OpenTelemetry Observability
+
+The operator can export its **reconcile traces, metrics, and logs** to an OTLP/gRPC collector — off by default. Enable it on a running cluster with a Helm upgrade (no CR change):
+
+```bash
+helm upgrade acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  -n aerospike-operator --reuse-values \
+  --set observability.otel.enabled=true \
+  --set observability.otel.endpoint=otel-collector.observability.svc.cluster.local:4317
+```
+
+The Deployment rolls; the new pod logs `OpenTelemetry export enabled`. Confirm export is flowing — a blocked egress instead logs `missing address` / `context deadline exceeded`:
+
+```bash
+kubectl -n aerospike-operator logs -l control-plane=controller-manager --tail=50 | grep -iE 'otel|export'
+```
+
+The collector then receives reconcile spans (`Reconcile` → `reconcileCluster` → `reconcileRacks`), the `acko_*` + controller-runtime metrics, and operator logs. Disable again with `--set observability.otel.enabled=false`.
+
+Config rules — `enabled` + `endpoint` both required, OTLP/gRPC endpoint scheme, the auto-added NetworkPolicy egress (`observability.otel.collectorPort`) — are covered in **acko-deploy**.
+
+---
+
 ## Reference Documents
 
 - [Operations Reference](./reference/operations.md) -- Detailed Day-2 operations with all kubectl commands

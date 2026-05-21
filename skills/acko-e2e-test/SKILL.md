@@ -105,6 +105,7 @@ PASS when **`tests/chart/test_helm_matrix.py`** verifies the matrix:
 | **UI web-only** | web only; NetworkPolicy with ONLY `:3100`; web pod has `automountServiceAccountToken=false`; NO helm-test pod |
 | **OTel disabled (default)** | `OTEL_SDK_DISABLED=true` in api env; no OTLP endpoint |
 | **OTel enabled** | `OTEL_SDK_DISABLED=false`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_TRACES_SAMPLER`, `OTEL_SERVICE_NAME` all set |
+| **Operator OTel enabled** | `observability.otel.enabled=true` → operator Deployment env has `OTEL_SDK_DISABLED=false` + `OTEL_EXPORTER_OTLP_ENDPOINT`; NetworkPolicy / CiliumNetworkPolicy gain an OTLP egress rule on `observability.otel.collectorPort` |
 | **`ingress.target` failfast** | `helm template` MUST fail with an error mentioning `ui.ingress.target` |
 
 Plus **`tests/chart/test_helm_lint.py`** — `helm lint` reports no `[ERROR]` entries.
@@ -165,6 +166,8 @@ PASS when **`tests/observability/test_otel_runtime.py`** (regression_guard for c
 - A deployed OpenTelemetry collector (`reference/otel-collector.yaml`) receives traces with `service.name: aerospike-cluster-manager-api`.
 - **Both** `opentelemetry.instrumentation.fastapi` and `opentelemetry.instrumentation.asyncpg` instrumentation scopes appear at the collector. Before #265 only asyncpg spans showed up, parent-less.
 - At least one trace contains a Server-kind FastAPI span (HTTP request) **and** an asyncpg child span sharing the same trace ID — proving HTTP→DB context propagation.
+
+**Operator side** (`observability.otel.*`) follows the same pattern: `helm upgrade --set observability.otel.enabled=true --set observability.otel.endpoint=<host:4317>` sets `OTEL_SDK_DISABLED=false` on the operator Deployment, and when `networkPolicy.enabled` / `cilium.enabled` is set the chart auto-adds the OTLP egress rule (`observability.otel.collectorPort`). Verified end-to-end on a Calico kind cluster (acko #281): operator reconcile spans, `acko_*` + controller-runtime metrics, and operator logs reach the collector — and removing the egress rule blocks export (negative control). A scheme-less endpoint is normalized to `http://`; the chart never deploys a collector.
 
 ### Performance / soak (release-tag only)
 

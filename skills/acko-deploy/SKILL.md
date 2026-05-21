@@ -47,6 +47,17 @@ Common install variants:
 
 SQLite is single-writer, so the chart pins `ui.replicaCount=1` and **fails the install if you raise it**. For an HA / multi-replica UI, point `ui.database.type=postgresql` at an **external** managed database (RDS / Cloud SQL / AlloyDB) — or supply its URL via `ui.database.postgresql.existingSecret`. The chart does not run PostgreSQL for you. Full value reference: ACKO docs → Reference → Helm Values.
 
+**OpenTelemetry export (operator).** Off by default. To export the operator's reconcile traces, metrics, and logs to an OTLP/gRPC collector, set **both** `observability.otel.enabled=true` and a non-empty `observability.otel.endpoint`:
+
+```bash
+helm upgrade --install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  -n aerospike-operator --create-namespace \
+  --set observability.otel.enabled=true \
+  --set observability.otel.endpoint=otel-collector.observability.svc.cluster.local:4317
+```
+
+`endpoint` alone does nothing (telemetry stays off); `enabled=true` without an `endpoint` fails chart rendering. The operator exports **OTLP/gRPC only** — a scheme-less `host:port` is normalized to `http://`, so pass `https://` explicitly for a TLS collector. When `networkPolicy.enabled` / `cilium.enabled` is set, the chart **auto-adds** the collector egress rule (`observability.otel.collectorPort`, default `4317`) — without it the locked-down egress silently drops all telemetry. The chart never deploys a collector itself. See **acko-operations** for enabling/verifying OTel on a running cluster.
+
 ### Step 2: Apply the Minimal CR
 
 ```yaml
