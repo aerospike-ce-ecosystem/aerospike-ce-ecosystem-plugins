@@ -99,7 +99,7 @@ PASS when **`tests/chart/test_helm_matrix.py`** verifies the matrix:
 
 | Mode | Contract |
 |------|----------|
-| **operator-only** (`--set ui.enabled=false`) | Operator Deployment present; NO ui-api/ui-web; NO ServiceMonitor |
+| **operator-only** (`--set ui.api.enabled=false --set ui.web.enabled=false`) | Operator Deployment present; NO ui-api/ui-web; NO ServiceMonitor |
 | **UI full** (api + web) | api + web Deployments; NetworkPolicy with both `:8000` and `:3100`; helm-test pod present |
 | **UI api-only** | api only; NetworkPolicy with ONLY `:8000`; helm-test pod present |
 | **UI web-only** | web only; NetworkPolicy with ONLY `:3100`; web pod has `automountServiceAccountToken=false`; NO helm-test pod |
@@ -110,7 +110,7 @@ PASS when **`tests/chart/test_helm_matrix.py`** verifies the matrix:
 
 Plus **`tests/chart/test_helm_lint.py`** — `helm lint` reports no `[ERROR]` entries.
 
-> ⚠️ **Drift note**: The chart's current default is `ui.enabled=true`. The "operator-only" row uses `--set ui.enabled=false` explicitly. If the default flips, update the parametrize entry.
+> ⚠️ **Drift note**: Chart 0.4.0 removed the legacy `ui.enabled` master switch. The UI is controlled by the independent `ui.api.enabled` / `ui.web.enabled` toggles (both default `true`); the "operator-only" row opts out by setting BOTH to `false`. If a future chart re-introduces a master switch, update the parametrize entries.
 
 ### Helm chart — real install + helm test
 

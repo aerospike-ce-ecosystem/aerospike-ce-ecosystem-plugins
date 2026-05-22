@@ -3,9 +3,11 @@
 Each mode is one parametrize entry. Tests are pure manifest-shape assertions
 that need no Kind cluster, so they run on every PR as a fast gate.
 
-Drift note: the chart currently ships `ui.enabled=true` by default. The
-operator-only mode therefore uses `--set ui.enabled=false` explicitly. If
-the chart default flips, update the parametrize id below.
+Drift note: chart 0.4.0 removed the legacy `ui.enabled` master switch in
+favour of the independent `ui.api.enabled` / `ui.web.enabled` toggles (both
+default `true`). Operator-only mode therefore opts out by setting BOTH to
+`false`. If a future chart re-introduces a master switch, update the
+parametrize entries below.
 """
 
 from __future__ import annotations
@@ -27,11 +29,11 @@ from helpers.chart_yaml import (
 
 
 # ---------------------------------------------------------------------------
-# Operator-only (chart default ships ui.enabled=true → must opt out explicitly)
+# Operator-only (UI on by default → opt out via ui.api + ui.web both false)
 # ---------------------------------------------------------------------------
 @pytest.mark.chart
 def test_operator_only_no_ui(chart_path: Path) -> None:
-    docs = template(chart_path, {"ui.enabled": "false"})
+    docs = template(chart_path, {"ui.api.enabled": "false", "ui.web.enabled": "false"})
     deps = deployment_names(docs)
 
     assert any(name == "foo-aerospike-ce-kubernetes-operator" for name in deps), (
@@ -53,7 +55,6 @@ def test_ui_full_renders_api_web_networkpolicy(chart_path: Path) -> None:
     docs = template(
         chart_path,
         {
-            "ui.enabled": "true",
             "ui.networkPolicy.enabled": "true",
             "ui.tests.enabled": "true",
         },
@@ -78,7 +79,6 @@ def test_ui_api_only_no_web(chart_path: Path) -> None:
     docs = template(
         chart_path,
         {
-            "ui.enabled": "true",
             "ui.web.enabled": "false",
             "ui.ingress.target": "api",
             "ui.networkPolicy.enabled": "true",
@@ -105,7 +105,6 @@ def test_ui_web_only_no_api(chart_path: Path) -> None:
     docs = template(
         chart_path,
         {
-            "ui.enabled": "true",
             "ui.api.enabled": "false",
             "ui.web.env.apiUrl": "http://x",
             "ui.networkPolicy.enabled": "true",
@@ -137,7 +136,7 @@ def test_ui_web_only_no_api(chart_path: Path) -> None:
 # ---------------------------------------------------------------------------
 @pytest.mark.chart
 def test_otel_disabled_by_default(chart_path: Path) -> None:
-    docs = template(chart_path, {"ui.enabled": "true"})
+    docs = template(chart_path, {})
     api = find_named(docs, "Deployment", "foo-aerospike-ce-kubernetes-operator-ui-api")
     assert api is not None
     env_vars = container_env(api, "api")
@@ -158,7 +157,6 @@ def test_otel_enabled_env_wiring(chart_path: Path) -> None:
     docs = template(
         chart_path,
         {
-            "ui.enabled": "true",
             "ui.api.otel.enabled": "true",
             "ui.api.otel.endpoint": "http://col:4317",
         },
@@ -181,7 +179,6 @@ def test_ingress_target_web_with_web_disabled_fails(chart_path: Path) -> None:
     err = template_expect_fail(
         chart_path,
         {
-            "ui.enabled": "true",
             "ui.web.enabled": "false",
             "ui.ingress.enabled": "true",
             # default ingress.target=web → conflicts with web.enabled=false

@@ -83,37 +83,37 @@ kubectl delete ns aerospike-operator
 cd charts/aerospike-ce-kubernetes-operator
 
 # Resource counts (use as a sanity check; exact numbers depend on chart version)
-helm template t . --set ui.enabled=true --set ui.networkPolicy.enabled=true --set ui.tests.enabled=true --set ui.ingress.enabled=true | grep -cE "^kind:"
+helm template t . --set ui.networkPolicy.enabled=true --set ui.tests.enabled=true --set ui.ingress.enabled=true | grep -cE "^kind:"
 # expect: ~33 (full)
 
-helm template t . --set ui.enabled=true --set ui.web.enabled=false --set ui.ingress.target=api --set ui.networkPolicy.enabled=true --set ui.tests.enabled=true --set ui.ingress.enabled=true | grep -cE "^kind:"
+helm template t . --set ui.web.enabled=false --set ui.ingress.target=api --set ui.networkPolicy.enabled=true --set ui.tests.enabled=true --set ui.ingress.enabled=true | grep -cE "^kind:"
 # expect: ~31 (api-only, no web Deployment / Service)
 
-helm template t . --set ui.enabled=true --set ui.api.enabled=false --set ui.web.env.apiUrl=http://x --set ui.networkPolicy.enabled=true --set ui.tests.enabled=true --set ui.ingress.enabled=true | grep -cE "^kind:"
+helm template t . --set ui.api.enabled=false --set ui.web.env.apiUrl=http://x --set ui.networkPolicy.enabled=true --set ui.tests.enabled=true --set ui.ingress.enabled=true | grep -cE "^kind:"
 # expect: ~26 (web-only, no api Deployment / Service / helm-test pod)
 ```
 
 NetworkPolicy port stanza assertions:
 
 ```bash
-helm template t . --set ui.enabled=true --set ui.web.enabled=false --set ui.networkPolicy.enabled=true | awk '/kind: NetworkPolicy/,/---/' | grep "port:"
+helm template t . --set ui.web.enabled=false --set ui.networkPolicy.enabled=true | awk '/kind: NetworkPolicy/,/---/' | grep "port:"
 # expect: only :8000
 
-helm template t . --set ui.enabled=true --set ui.api.enabled=false --set ui.web.env.apiUrl=http://x --set ui.networkPolicy.enabled=true | awk '/kind: NetworkPolicy/,/---/' | grep "port:"
+helm template t . --set ui.api.enabled=false --set ui.web.env.apiUrl=http://x --set ui.networkPolicy.enabled=true | awk '/kind: NetworkPolicy/,/---/' | grep "port:"
 # expect: only :3100
 ```
 
 `automountServiceAccountToken` assertion (web pod):
 
 ```bash
-helm template t . --set ui.enabled=true | awk '/name: web/,/---/' | grep automountServiceAccountToken
+helm template t . | awk '/name: web/,/---/' | grep automountServiceAccountToken
 # expect: false
 ```
 
 ingress.target failfast:
 
 ```bash
-helm template t . --set ui.enabled=true --set ui.web.enabled=false --set ui.ingress.enabled=true 2>&1 | grep -i "ingress.target"
+helm template t . --set ui.web.enabled=false --set ui.ingress.enabled=true 2>&1 | grep -i "ingress.target"
 # expect: explicit error from ingress.yaml:11 telling the user to flip the target
 ```
 

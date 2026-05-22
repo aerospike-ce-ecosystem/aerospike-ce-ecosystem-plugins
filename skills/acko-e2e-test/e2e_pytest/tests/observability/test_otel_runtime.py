@@ -6,6 +6,11 @@ toggle, deploys an OTel collector with a debug exporter, generates traffic,
 and asserts that **both** instrumentation scopes appear AND that at least
 one trace contains a Server-kind FastAPI span and an asyncpg child span
 sharing the trace ID.
+
+The asyncpg half of the contract only holds against a real PostgreSQL
+backend. The chart default is sqlite (no asyncpg driver, no asyncpg
+spans), so this test switches the release to the chart-managed embedded
+PostgreSQL on the helm upgrade below.
 """
 
 from __future__ import annotations
@@ -28,6 +33,15 @@ COLLECTOR_YAML = Path(__file__).resolve().parents[3] / "reference" / "otel-colle
 
 
 def _ui_api_pod() -> str:
+    """Name of the newest ui-api pod (by creation timestamp).
+
+    A `helm upgrade` rolls the Deployment; during the cutover the old
+    (Terminating) pod and the freshly-rolled pod both match the label
+    selector, and `{.items[0]}` ordering is not deterministic — it can
+    return the stale pod, whose env still reflects the pre-upgrade
+    values. Sorting by creation timestamp and taking the last entry
+    always yields the post-upgrade pod.
+    """
     return run_text(
         [
             "kubectl",
@@ -37,8 +51,9 @@ def _ui_api_pod() -> str:
             env.NS_OPERATOR,
             "-l",
             "app.kubernetes.io/component=ui-api",
+            "--sort-by=.metadata.creationTimestamp",
             "-o",
-            "jsonpath={.items[0].metadata.name}",
+            "jsonpath={.items[-1:].metadata.name}",
         ]
     )
 
@@ -153,11 +168,21 @@ def test_otel_runtime_emits_correlated_traces(
             f"ui.api.otel.endpoint={otel_collector}",
             "--set",
             "ui.api.otel.protocol=grpc",
+            # asyncpg instrumentation only emits spans against a real
+            # PostgreSQL backend. The chart default is sqlite, so the
+            # HTTP->DB correlation contract below requires switching the
+            # release to the chart-managed embedded PostgreSQL. The
+            # upgrade-safety gates do not fire on a fresh sqlite install
+            # (no leftover embedded-mode Secret / StatefulSet).
+            "--set",
+            "ui.database.type=postgresql",
+            "--set",
+            "ui.database.postgresql.deploy=true",
             "--wait",
             "--timeout",
-            "3m",
+            "5m",
         ],
-        timeout=300,
+        timeout=420,
     )
     run(
         [
@@ -167,7 +192,7 @@ def test_otel_runtime_emits_correlated_traces(
             "-n",
             helm_release["namespace"],
             "deploy",
-            "--timeout=2m",
+            "--timeout=3m",
         ]
     )
 

@@ -223,7 +223,7 @@ def ui_api_pf(helm_release: dict) -> Iterator[str]:
         ]
     )
     if not svc:
-        pytest.skip("ui-api Service not found — is ui.enabled=true?")
+        pytest.skip("ui-api Service not found — is ui.api.enabled=true?")
     with port_forward(
         namespace=helm_release["namespace"],
         service=svc,
