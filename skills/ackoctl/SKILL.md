@@ -247,7 +247,7 @@ ackoctl k8s cluster reconcile aerospike/sample-cluster   # stamp acko.io/force-r
 ackoctl k8s cluster scale aerospike/sample-cluster --size=5
 ackoctl k8s cluster logs aerospike/sample-cluster --pod=sample-cluster-0-0 \
   --container=aerospike-server --since=5m --tail=200
-ackoctl k8s events list aerospike/sample-cluster --since=30m
+ackoctl k8s cluster events aerospike/sample-cluster --since=30m
 ```
 
 Cluster identifiers use the `"<namespace>/<name>"` form — always quote them in shell.
