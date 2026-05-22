@@ -18,6 +18,10 @@ Per-release notes are also auto-published to [GitHub Releases](https://github.co
 ### Fixed
 
 - Skill command examples — corrected stale `ackoctl` verbs (`k8s pod logs` → `k8s cluster logs`, `udf register` → `udf upload`) and CE 7.x namespace parameters (`stop-writes-pct` → `stop-writes-sys-memory-pct`, `high-water-*-pct` → `evict-used-pct`) across `acko-debugging`, `ackoctl`, `acko-operations`, and `README.md`.
+- `ackoctl k8s events list` → `ackoctl k8s cluster events` — the events verb lives under the `k8s cluster` noun in the actual CLI (`ackoctl/SKILL.md`, `acko-debugging/SKILL.md`, `README.md`).
+- `ackoctl/reference/commands.md` — corrected `cluster configure-namespace` flags from `--namespace`/`--set` to the real `--name`/`--param` (repeatable), matching `ackoctl/SKILL.md` and the CLI.
+- `README.md` — Aerospike-py prerequisite bumped from "Python 3.9+" to "Python 3.10+" (aerospike-py declares `requires-python = ">=3.10"`).
+- `acko-e2e-test` and `acko-debugging` skill `description` frontmatter trimmed below the 1024-character limit so the skills load without truncation.
 
 ### Removed
 

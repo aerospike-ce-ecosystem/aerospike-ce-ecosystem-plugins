@@ -1,6 +1,6 @@
 ---
 name: acko-debugging
-description: "Systematic 6-step diagnosis procedure for ACKO-managed Aerospike CE clusters, with CE 8.1-specific pitfalls and a remediation matrix. Routes data-plane and K8s-plane probes through ackoctl (which calls cluster-manager — the authoritative source for AerospikeCluster state) and falls back to kubectl/asinfo when ackoctl is unavailable. MUST USE when the user reports CrashLoopBackOff, AerospikeCluster CRD phase=Error / WaitingForMigration / InProgress stuck, dynamic config rollback failed, ConfigDegraded, circuit breaker active, namespace stop-writes, split cluster, ACLSyncError, RestartFailed, ReadinessGateBlocking, ScaleDownDeferred, operator log errors, webhook rejection, or any troubleshooting flow that resolves to running diagnostic commands or queries against an ACKO Aerospike cluster. Triggers on: 'CrashLoopBackOff', 'phase=Error', 'reconcile failure', 'cluster won''t start', 'pods stuck', 'migration stuck', 'dynamic config failed', 'CE 8.1 config error', 'AerospikeCluster reconcile', 'debug aerospike cluster', 'troubleshoot ACKO'."
+description: "Systematic 6-step diagnosis procedure for ACKO-managed Aerospike CE clusters, with CE 8.1-specific pitfalls and a remediation matrix. Routes data-plane and K8s-plane probes through ackoctl (which calls cluster-manager — the authoritative source for AerospikeCluster state) and falls back to kubectl/asinfo when ackoctl is unavailable. MUST USE when the user reports a broken ACKO cluster — CrashLoopBackOff, AerospikeCluster CRD phase=Error / WaitingForMigration / InProgress stuck, ConfigDegraded, circuit breaker active, split cluster, ACLSyncError, webhook rejection — or any troubleshooting flow that resolves to running diagnostic commands or queries against an ACKO Aerospike cluster. Triggers on: 'CrashLoopBackOff', 'phase=Error', 'reconcile failure', 'cluster won''t start', 'pods stuck', 'migration stuck', 'dynamic config failed', 'CE 8.1 config error', 'AerospikeCluster reconcile', 'debug aerospike cluster', 'troubleshoot ACKO'."
 ---
 
 # ACKO Cluster Debugging Procedure
@@ -18,7 +18,7 @@ For routine reads (`ackoctl k8s cluster list`, `ackoctl record get`, …) the CL
 Prefer `ackoctl` for **both** planes. It goes through cluster-manager, which is the authoritative source for AerospikeCluster state (it normalises CR status fields, classifies K8s events, and enforces workspace ACL). Fall back to `kubectl` / direct `asinfo` only when `ackoctl` is unavailable, or when a field the cluster-manager summary does not surface yet is needed.
 
 - **Data plane** — `ackoctl cluster info`, `ackoctl info --command=...`, `ackoctl query exec`, `ackoctl record get`, `ackoctl set list`.
-- **K8s plane** — `ackoctl k8s cluster list / get / reconcile / scale`, `ackoctl k8s cluster logs`, `ackoctl k8s events list`. Requires cluster-manager started with `K8S_MANAGEMENT_ENABLED=true`; if `ackoctl k8s cluster list` returns a 404, fall back to `kubectl` for the K8s plane.
+- **K8s plane** — `ackoctl k8s cluster list / get / reconcile / scale`, `ackoctl k8s cluster logs`, `ackoctl k8s cluster events`. Requires cluster-manager started with `K8S_MANAGEMENT_ENABLED=true`; if `ackoctl k8s cluster list` returns a 404, fall back to `kubectl` for the K8s plane.
 
 If `ackoctl` is not installed or no context is configured, tell the user:
 
@@ -89,7 +89,7 @@ Use `statistics` output to see `cluster_size`, `migration_status`, `stop_writes`
 ackoctl --context={ctx} k8s cluster list                                            # all CRs in the workspace
 ackoctl --context={ctx} k8s cluster list --workspace=<ws>                           # explicit workspace filter
 ackoctl --context={ctx} k8s cluster get <ns>/<name> -o yaml                         # phase, size, conditions, dynamicConfigStatus
-ackoctl --context={ctx} k8s events list <ns>/<name> --since=30m                     # classified events
+ackoctl --context={ctx} k8s cluster events <ns>/<name> --since=30m                  # classified events
 ackoctl --context={ctx} k8s cluster logs <ns>/<name> --pod=<pod> --container=aerospike-server --since=5m --tail=200
 ```
 
@@ -231,7 +231,7 @@ Look for:
 **Prefer ackoctl** (already classifies each event into `Rolling Restart`, `Configuration`, `Scaling`, `Network`, `Rack Management`, …):
 
 ```bash
-ackoctl --context={ctx} k8s events list <ns>/<name> --since=60m
+ackoctl --context={ctx} k8s cluster events <ns>/<name> --since=60m
 ```
 
 `kubectl` fallback (raw, unclassified):

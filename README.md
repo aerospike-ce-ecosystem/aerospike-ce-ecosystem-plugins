@@ -55,7 +55,7 @@ claude plugin list
 | Skill | Trigger | Description |
 |-------|---------|-------------|
 | **ackoctl** | "ackoctl", "manage Aerospike connection", "browse records", "register UDF", "scale cluster" | Drive [aerospike-cluster-manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager) via the [ackoctl](https://github.com/aerospike-ce-ecosystem/ackoctl) CLI — connections, cluster info, records/sets, queries, secondary indexes, operator notes, raw asinfo, K8s AerospikeCluster CRs, admin (users/roles), and Lua UDF modules. Multi-cluster ACKO friendly via kubeconfig-style contexts. |
-| **acko-debugging** | "CrashLoopBackOff", "phase=Error", "reconcile failure", "migration stuck" | Systematic 6-step diagnosis procedure for ACKO clusters with CE 8.1 pitfalls and a remediation matrix. Routes both data-plane and K8s-plane probes through ackoctl (`ackoctl cluster info`, `ackoctl info`, `ackoctl query exec`, `ackoctl k8s cluster get/list`, `ackoctl k8s cluster logs`, `ackoctl k8s events list`); falls back to `kubectl`/`asinfo` when ackoctl is unavailable. |
+| **acko-debugging** | "CrashLoopBackOff", "phase=Error", "reconcile failure", "migration stuck" | Systematic 6-step diagnosis procedure for ACKO clusters with CE 8.1 pitfalls and a remediation matrix. Routes both data-plane and K8s-plane probes through ackoctl (`ackoctl cluster info`, `ackoctl info`, `ackoctl query exec`, `ackoctl k8s cluster get/list`, `ackoctl k8s cluster logs`, `ackoctl k8s cluster events`); falls back to `kubectl`/`asinfo` when ackoctl is unavailable. |
 
 ### Ecosystem support
 
@@ -107,7 +107,7 @@ The `ackoctl` skill covers install, configuration, and every command (connection
 
 ### For aerospike-py skills
 
-- Python 3.9+
+- Python 3.10+ (aerospike-py requires `>=3.10`; wheels cover 3.10–3.14)
 - Running Aerospike server (localhost:3000 by default)
 
 ## Benchmark Results

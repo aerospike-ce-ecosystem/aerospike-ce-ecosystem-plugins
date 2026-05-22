@@ -39,7 +39,7 @@ Read-only. **Run `guide get` before any mutating command** and follow the policy
 | Verb | One-liner |
 |------|-----------|
 | `cluster info CONN_ID` | Nodes + namespaces + sets summary. |
-| `cluster configure-namespace CONN_ID --namespace NS --set KEY=VAL [...]` | Patch dynamic-config knobs server-side. |
+| `cluster configure-namespace CONN_ID --name NS --param KEY=VAL [--param ...]` | Patch dynamic-config knobs server-side (`--param` is repeatable). |
 
 ## `set` — set inspection + destructive ops
 
