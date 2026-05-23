@@ -699,10 +699,13 @@ write_dtype = np.dtype([("_key", "i4"), ("x", "f8"), ("y", "f8"), ("category", "
 data = np.array([(1, 1.0, 2.0, 0), (2, 3.0, 4.0, 1), (3, 5.0, 6.0, 0)], dtype=write_dtype)
 client.batch_write_numpy(data, "test", "points", write_dtype)
 
-# Read back with _dtype
+# Read back with .to_numpy(dtype) — GIL released during the structured-array fill
 read_dtype = np.dtype([("x", "f8"), ("y", "f8"), ("category", "i4")])
 keys = [("test", "points", i) for i in range(1, 4)]
-batch = client.batch_read(keys, _dtype=read_dtype, policy={"key": aerospike.POLICY_KEY_SEND})
+batch = client.batch_read(
+    keys,
+    policy={"key": aerospike.POLICY_KEY_SEND},
+).to_numpy(read_dtype)
 
 print(batch.batch_records["x"].mean())       # 3.0
 print(batch.batch_records["category"].sum())  # 1

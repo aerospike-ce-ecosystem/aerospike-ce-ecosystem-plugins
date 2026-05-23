@@ -1,6 +1,6 @@
 ---
 name: aerospike-py-api
-description: "MUST USE when writing any Python code with aerospike-py or aerospike_py. This is a Rust/PyO3 library with UNCONVENTIONAL patterns that differ from typical Python clients — exceptions live on the module (aerospike_py.RecordNotFound, NOT aerospike_py.exception.RecordNotFound), return types are NamedTuples (record.bins, record.meta.gen, NOT tuple unpacking), batch_read returns dict[UserKey, AerospikeRecord] (NOT BatchRecords), and policies use module-level constants (aerospike_py.POLICY_EXISTS_CREATE_ONLY). Without this skill, code will use wrong import paths, wrong return type patterns, and miss critical features like expression filters (exp module), batch_write with in_doubt retry semantics, CDT list/map/bit/hll, ping() health check, backpressure, Prometheus metrics, OpenTelemetry tracing, NumPy integration, and admin APIs. Triggers on: aerospike-py, aerospike_py, AsyncClient, client.ping(), batch_write, Python + Aerospike, put/get/query/batch with Aerospike."
+description: "MUST USE when writing any Python code with aerospike-py or aerospike_py. This is a Rust/PyO3 library with UNCONVENTIONAL patterns that differ from typical Python clients — exceptions live on the module (aerospike_py.RecordNotFound, NOT aerospike_py.exception.RecordNotFound), return types are NamedTuples (record.bins, record.meta.gen, NOT tuple unpacking), batch_read returns a LazyBatchRecords handle (call .to_dict() for dict[UserKey, AerospikeRecord], .to_numpy(np.dtype([...])) for a zero-copy NumPy structured array; dict-style ops like handle.items() / handle[\"k\"] keep working through the Mapping backward-compat layer), and policies use module-level constants (aerospike_py.POLICY_EXISTS_CREATE_ONLY). Without this skill, code will use wrong import paths, wrong return type patterns, the removed _dtype= kwarg, and miss critical features like expression filters (exp module), batch_write with in_doubt retry semantics, CDT list/map/bit/hll, ping() health check, backpressure, Prometheus metrics, OpenTelemetry tracing, NumPy integration, and admin APIs. Triggers on: aerospike-py, aerospike_py, AsyncClient, client.ping(), batch_write, Python + Aerospike, put/get/query/batch with Aerospike."
 ---
 
 ## Installation
@@ -84,11 +84,20 @@ Detail: `./reference/admin.md`
 ```python
 keys = [("test", "demo", f"user_{i}") for i in range(10)]
 
-# batch_read -> dict[UserKey, AerospikeRecord]  (UserKey = str | int, AerospikeRecord = dict[str, Any])
-records = client.batch_read(keys)  # or batch_read(keys, bins=["name"])
-for user_key, bins in records.items():
+# batch_read -> LazyBatchRecords (a deferred-conversion handle, NOT a dict).
+# Materialise explicitly via .to_dict() or .to_numpy(dtype):
+lazy_records = client.batch_read(keys)              # or batch_read(keys, bins=["name"])
+for user_key, bins in lazy_records.to_dict().items():
     print(user_key, bins["name"])
-# Missing keys are absent from dict. 2.6x faster than C client under asyncio.gather.
+
+# Backward compat: the handle implements the Mapping protocol over a cached
+# to_dict() view, so existing dict-style code keeps working without changes:
+if "user_3" in lazy_records:
+    print(lazy_records["user_3"]["name"])
+for user_key, bins in lazy_records.items():         # same as .to_dict().items()
+    ...
+
+# Missing keys are absent from the dict view. 2.6x faster than C client under asyncio.gather.
 
 # batch_operate / batch_remove return BatchWriteResult (NamedTuple wrapper with .batch_records)
 results = client.batch_operate(keys, [{"op": aerospike_py.OPERATOR_INCR, "bin": "views", "val": 1}])
@@ -99,7 +108,7 @@ results = client.batch_remove(keys)
 failed = [br for br in results.batch_records if br.result != 0]
 ```
 
-NumPy: `batch_read(..., _dtype=np.dtype(...))` returns `NumpyBatchRecords` (NOT dict); `batch_write_numpy(data, ns, set, dtype, retry=3)` for writes with auto-retry. Detail: `./reference/read.md` | `./reference/write.md`
+NumPy: `batch_read(...).to_numpy(np.dtype([...]))` returns `NumpyBatchRecords` for a zero-copy structured array (the per-record fill runs with the GIL released via `py.detach`, ideal for FastAPI/PyTorch CPU-inference workers — pair with `torch.from_numpy(...)`). `dtype` must be a real `np.dtype` object; list-of-tuples / dtype strings are not auto-promoted. The legacy `batch_read(..., _dtype=...)` kwarg has been **removed**. For writes use `batch_write_numpy(data, ns, set, dtype, retry=3)` (auto-retry). Detail: `./reference/read.md` | `./reference/write.md`
 
 ## 5b. Batch Write
 

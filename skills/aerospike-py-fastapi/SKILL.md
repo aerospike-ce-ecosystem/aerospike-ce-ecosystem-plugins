@@ -1,6 +1,6 @@
 ---
 name: aerospike-py-fastapi
-description: "MUST USE for building FastAPI/REST API applications with Aerospike database (aerospike-py Rust/PyO3 async client). Covers AsyncClient lifespan management, FastAPI Depends injection, aerospike_py exception-to-HTTP-status mapping (RecordNotFound→404, RecordExistsError→409, BackpressureError→503, AerospikeTimeoutError→504), POLICY_EXISTS_CREATE_ONLY/UPDATE_ONLY for CRUD semantics, NamedTuple attribute access (record.bins not tuple unpacking), client.ping() readiness probe, batch_read returning dict, batch_write with in_doubt retry signal, and global AerospikeError handler. Triggers on: FastAPI + Aerospike, REST API + aerospike-py, CRUD API with Aerospike, client.ping() health probe, batch_read/batch_write endpoint, web server/HTTP service backed by Aerospike NoSQL, uvicorn + Aerospike."
+description: "MUST USE for building FastAPI/REST API applications with Aerospike database (aerospike-py Rust/PyO3 async client). Covers AsyncClient lifespan management, FastAPI Depends injection, aerospike_py exception-to-HTTP-status mapping (RecordNotFound→404, RecordExistsError→409, BackpressureError→503, AerospikeTimeoutError→504), POLICY_EXISTS_CREATE_ONLY/UPDATE_ONLY for CRUD semantics, NamedTuple attribute access (record.bins not tuple unpacking), client.ping() readiness probe, batch_read returning a LazyBatchRecords handle (dict-like Mapping over a cached .to_dict() view, plus .to_numpy(np.dtype([...])) for a zero-copy structured array ideal for FastAPI+PyTorch inference workers — the per-record fill releases the GIL via py.detach so other request handlers can run concurrently), batch_write with in_doubt retry signal, and global AerospikeError handler. Triggers on: FastAPI + Aerospike, REST API + aerospike-py, CRUD API with Aerospike, client.ping() health probe, batch_read/batch_write endpoint, web server/HTTP service backed by Aerospike NoSQL, uvicorn + Aerospike, FastAPI + PyTorch inference with Aerospike."
 ---
 
 ## 1. App Structure (Lifespan + DI)
@@ -76,7 +76,7 @@ async def delete(pk: str, client: AsyncClient = Depends(get_client)):
 
 ## 2b. Batch Endpoints
 
-`batch_read` returns `dict[UserKey, AerospikeRecord]` -- iterate with `.items()`. Missing keys are absent from the dict.
+`batch_read` returns a `LazyBatchRecords` handle (NOT a dict). Materialise via `.to_dict()` for the JSON response, or use the dict-like Mapping dunders directly (`handle.items()`, `handle["k"]`, `"k" in handle`). For inference handlers feeding torch, use `.to_numpy(np.dtype([...]))` — the per-record fill runs with the GIL released, so other request handlers keep making progress while the structured array is built. Missing keys are absent from the dict view.
 
 ```python
 from pydantic import BaseModel
@@ -87,8 +87,26 @@ class BatchReadReq(BaseModel):
 @app.post("/records:batchRead")
 async def batch_read(req: BatchReadReq, client: AsyncClient = Depends(get_client)):
     keys = [(NS, SET, k) for k in req.keys]
-    records = await client.batch_read(keys)            # dict[str, dict[str, Any]]
+    lazy_records = await client.batch_read(keys)        # LazyBatchRecords handle
+    records = lazy_records.to_dict()                    # dict[str, dict[str, Any]]
     return {"found": records, "missing": [k for k in req.keys if k not in records]}
+
+# Inference endpoint — zero-copy chain to torch
+import numpy as np
+import torch
+
+_FEATURE_DTYPE = np.dtype([("score", "f4"), ("count", "i4")])  # cache at module level
+
+@app.post("/records:predict")
+async def predict(req: BatchReadReq, client: AsyncClient = Depends(get_client)):
+    keys = [(NS, SET, k) for k in req.keys]
+    lazy_records = await client.batch_read(keys, bins=["score", "count"])
+    np_batch = lazy_records.to_numpy(_FEATURE_DTYPE)    # GIL released during fill
+    matrix = torch.from_numpy(np.column_stack([
+        np_batch.batch_records[name] for name in _FEATURE_DTYPE.names
+    ]))                                                 # O(1) buffer share
+    scores = (matrix @ MODEL_W + MODEL_B).tolist()
+    return {"scores": scores}
 
 class BatchWriteItem(BaseModel):
     key: str

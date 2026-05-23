@@ -60,49 +60,53 @@ if result.meta is not None:
     print(f"gen={result.meta.gen}")
 ```
 
-### batch_read(keys, bins=None, policy=None, _dtype=None) -> dict[UserKey, AerospikeRecord] | NumpyBatchRecords
+### batch_read(keys, bins=None, policy=None) -> LazyBatchRecords
 
-Read multiple records in a single network call. **Returns dict** keyed by user key (str | int) to bins dict. Missing keys are absent from the dict. Roughly 2.6x faster than the official C client under `asyncio.gather` workloads.
+Read multiple records in a single network call. **Returns a `LazyBatchRecords` handle** that wraps the raw Rust results. The async future itself completes with near-zero GIL cost (`Arc::new` + `Py::new`); materialisation is deferred to explicit method calls on the handle:
+
+- `lazy_records.to_dict()` → `dict[UserKey, AerospikeRecord]` (missing / failed records absent)
+- `lazy_records.to_numpy(dtype)` → `NumpyBatchRecords` (zero-copy structured array — the per-record buffer fill runs with the GIL released via `py.detach`)
+- `lazy_records.batch_records` → `list[BatchRecord]` (compat — includes digest-only and failed records)
+
+`LazyBatchRecords` also implements the dict-like Mapping protocol so existing dict-style code keeps working without explicit `.to_dict()`:
 
 ```python
 keys = [("test", "demo", f"user_{i}") for i in range(10)]
 
-# All bins
-records: dict[str | int, dict[str, Any]] = client.batch_read(keys)
-for user_key, bins in records.items():
+# All bins — handle is dict-like (backed by a lazy + cached to_dict view)
+lazy_records = client.batch_read(keys)
+for user_key, bins in lazy_records.items():
     print(user_key, bins["name"])
 
-# Specific bins
-records = client.batch_read(keys, bins=["name", "age"])
+# Or call .to_dict() explicitly
+records: dict[str | int, dict[str, Any]] = lazy_records.to_dict()
 
-# Existence check (empty bins) -- still returns dict; missing keys absent
-records = client.batch_read(keys, bins=[])
+# Specific bins
+lazy_records = client.batch_read(keys, bins=["name", "age"])
+
+# Existence check (empty bins) -- handle is still dict-like; missing keys absent
+lazy_records = client.batch_read(keys, bins=[])
 
 # Async
-records = await async_client.batch_read(keys, bins=["name", "age"])
+lazy_records = await async_client.batch_read(keys, bins=["name", "age"])
+for user_key, bins in lazy_records.items():
+    ...
 
-# NumPy zero-copy variant returns NumpyBatchRecords (NOT dict)
+# NumPy zero-copy: dtype MUST be a np.dtype object (list/string not auto-promoted)
 import numpy as np
-np_batch = client.batch_read(keys, _dtype=np.dtype([("score", "i4")]))
-np_batch.batch_records["score"].mean()
+dtype = np.dtype([("score", "i4")])
+np_batch = client.batch_read(keys).to_numpy(dtype)
+np_batch.batch_records["score"].mean()                  # columnar view
+import torch
+tensor = torch.from_numpy(np_batch.batch_records["score"])   # O(1) pointer share
 ```
 
-**Migration from `BatchRecords`:**
+**Removed / renamed:**
 
-```python
-# Before (pre-April 2026)
-batch = client.batch_read(keys)
-for br in batch.batch_records:
-    if br.result == 0 and br.record is not None:
-        print(br.record.bins)
+- `batch_read(..., _dtype=...)` kwarg is **gone** — use `batch_read(...).to_numpy(dtype)`.
+- `BatchReadHandle` class was renamed to `LazyBatchRecords`. `lazy_records.as_dict()` and `LazyBatchRecords.merge_as_dict(...)` remain as forwarding aliases for `to_dict()` / `merge_to_dict(...)`.
 
-# After
-records = client.batch_read(keys)
-for user_key, bins in records.items():
-    print(bins)
-```
-
-Note: `batch_operate`, `batch_remove`, `batch_write`, and `batch_write_numpy` return `BatchWriteResult` (a NamedTuple wrapping `list[BatchRecord]`) -- only `batch_read` returns the new dict shape (`BatchRecords`, redefined as a TypeAlias for `dict[UserKey, AerospikeRecord]`).
+Note: `batch_operate`, `batch_remove`, `batch_write`, and `batch_write_numpy` return `BatchWriteResult` (a NamedTuple wrapping `list[BatchRecord]`) — only `batch_read` returns the `LazyBatchRecords` handle.
 
 ### ReadPolicy
 
@@ -464,7 +468,7 @@ expr = exp.and_(
 
 record = client.get(key, policy={"filter_expression": expr})
 record = await async_client.get(key, policy={"filter_expression": expr})
-results = client.batch_read(keys, policy={"filter_expression": expr})
+lazy_records = client.batch_read(keys, policy={"filter_expression": expr})
 records = query.results(policy={"filter_expression": expr})
 ```
 
@@ -542,15 +546,21 @@ dtype = np.dtype([
 
 ### Read into NumPy Arrays
 
+`batch_read()` returns a `LazyBatchRecords` handle; call `.to_numpy(dtype)` on it to get a `NumpyBatchRecords`. `dtype` **must be a real `np.dtype` object** — list-of-tuples / dtype strings are not auto-promoted, wrap them with `np.dtype(...)` first.
+
 ```python
 keys = [("test", "demo", f"user_{i}") for i in range(1000)]
 
-result = client.batch_read(keys, bins=["score", "count", "level", "tag"], _dtype=dtype)
-# result is a NumpyBatchRecords instance
+# Sync
+lazy_records = client.batch_read(keys, bins=["score", "count", "level", "tag"])
+result = lazy_records.to_numpy(dtype)               # NumpyBatchRecords
 
 # Async
-result = await async_client.batch_read(keys, bins=["score", "count"], _dtype=dtype)
+lazy_records = await async_client.batch_read(keys, bins=["score", "count"])
+result = lazy_records.to_numpy(dtype)
 ```
+
+The per-record `Value → buffer` fill loop runs with the GIL released (`py.detach`), so sibling Python work (torch inference, other asyncio tasks) can hold the GIL while the buffer fills — pair the result with `torch.from_numpy(...)` for an O(1) tensor hand-off.
 
 ### NumpyBatchRecords API
 
@@ -589,7 +599,7 @@ valid_records = result.batch_records[success_mask]
 ```python
 import pandas as pd
 
-result = client.batch_read(keys, bins=["score", "count"], _dtype=dtype)
+result = client.batch_read(keys, bins=["score", "count"]).to_numpy(dtype)
 
 # Direct conversion -- zero copy for numeric data
 df = pd.DataFrame(result.batch_records)

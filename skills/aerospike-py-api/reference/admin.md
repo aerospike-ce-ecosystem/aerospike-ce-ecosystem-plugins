@@ -267,12 +267,14 @@ Batch operations do not raise exceptions for individual record failures. Check p
 import aerospike_py as aerospike
 
 keys = [("test", "demo", f"id-{i}") for i in range(100)]
-records = client.batch_read(keys)
-# batch_read returns dict[UserKey, AerospikeRecord]; missing keys are absent
-present_user_keys = set(records.keys())
+lazy_records = client.batch_read(keys)
+# batch_read returns a LazyBatchRecords handle that is dict-like
+# (call .to_dict() if you need the materialised dict[UserKey, AerospikeRecord]).
+# Missing keys are absent from the dict view.
+present_user_keys = set(lazy_records.keys())
 expected_user_keys = {f"id-{i}" for i in range(100)}
 missing = expected_user_keys - present_user_keys
-for user_key, bins in records.items():
+for user_key, bins in lazy_records.items():
     print(user_key, bins)
 for user_key in missing:
     print("missing:", user_key)
