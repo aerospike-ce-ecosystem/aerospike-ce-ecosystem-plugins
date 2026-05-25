@@ -38,7 +38,7 @@ claude plugin list
 
 | Skill | Trigger | Description |
 |-------|---------|-------------|
-| **acko-deploy** | "deploy Aerospike on Kubernetes" | Step-by-step guide to deploy CE clusters via AerospikeCluster CR — 8 scenarios from minimal to full-featured |
+| **acko-deploy** | "deploy Aerospike on Kubernetes" | Step-by-step guide to deploy CE clusters via AerospikeCluster CR — 9 scenarios from minimal to full-featured |
 | **acko-operations** | "scale Aerospike cluster" | Day-2 operations: scale, upgrade, dynamic config, warm restart, ACL, pause/resume, troubleshooting |
 | **acko-config-reference** | *(background)* | CE 8.1 parameter reference, CRD-to-conf mapping, webhook validation rules |
 | **acko-e2e-test** | "ACKO e2e test", "kind cluster test" | End-to-end test playbook — canonical scenarios, Ginkgo labels, mandatory `helm install` operator setup, release-verification performance checks |
