@@ -1,6 +1,6 @@
 ---
 name: acko-config-reference
-description: "Aerospike CE 8.1 configuration parameters, CRD YAML mapping, ACKO operator auto-processing rules, AerospikeCluster status phases/conditions, and webhook validation rules. Background reference for Aerospike cluster configuration on Kubernetes. Automatically consulted when configuring CE 8.1 parameters, writing AerospikeCluster CRD YAML, looking up status phase/condition meanings (Completed, ConfigDegraded, ReconcileHealthy), or understanding breaking changes from 7.x to 8.1."
+description: "Aerospike CE 8.1 configuration parameters, CRD YAML mapping, ACKO operator auto-processing rules, AerospikeCluster status phases/conditions, and webhook validation rules. Background reference for Aerospike cluster configuration on Kubernetes. Automatically consulted when configuring CE 8.1 parameters, writing AerospikeCluster CRD YAML, looking up status phase/condition meanings (Completed, ConfigDegraded, ReconcileHealthy), understanding breaking changes from 7.x to 8.1 (CE 8.1 breaking changes, data-size rename, info port 3003 removal, 7.x to 8.1 migration), or webhook rejection reasons."
 user-invocable: false
 ---
 
