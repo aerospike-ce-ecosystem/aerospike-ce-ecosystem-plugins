@@ -1,6 +1,6 @@
 ---
 name: ackoctl
-description: "MUST USE when the user drives Aerospike clusters via the ackoctl CLI — connections, records/sets/queries, secondary indexes, operator notes, operational guides, raw asinfo, K8s AerospikeCluster CRs (list/get/scale/logs/events/pods/reconcile), admin users/roles, and Lua UDFs. ALWAYS read the workspace's data-plane / control-plane operational guide with `ackoctl guide get` before running any data or cluster operation, and follow the org/team policy it states. Triggers on: ackoctl, ackoctl guide, manage Aerospike connection, browse records, run query, scale cluster, register UDF, create Aerospike user, read operational guide. Replaces the retired ACM MCP server — canonical way to drive cluster-manager from Claude Code."
+description: "MUST USE when the user drives Aerospike clusters via the ackoctl CLI — connections, records/sets/queries, secondary indexes, operator notes, operational guides, raw asinfo, K8s AerospikeCluster CRs (list/get/scale/logs/events/pods/reconcile), admin users/roles, and Lua UDFs. ALWAYS read the workspace's data-plane / control-plane operational guide with `ackoctl guide get` before running any data or cluster operation, and follow the org/team policy it states. Triggers on: ackoctl, ackoctl guide, manage Aerospike connection, browse records, run query, ackoctl k8s cluster scale, register UDF, create Aerospike user, read operational guide. Replaces the retired ACM MCP server — canonical way to drive cluster-manager from Claude Code."
 ---
 
 # ackoctl — cluster-manager CLI for Claude Code
