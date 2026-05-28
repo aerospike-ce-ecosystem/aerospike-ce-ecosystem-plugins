@@ -75,7 +75,7 @@ except aerospike_py.AerospikeError as e: ...  # catch-all
 
 Hierarchy: `AerospikeError` > `ClientError(BackpressureError)`, `ClusterError`, `AerospikeTimeoutError`, `RecordError(RecordNotFound, RecordExistsError, RecordGenerationError, FilteredOut, ...)`, `ServerError(AerospikeIndexError, QueryError, AdminError, UDFError)`
 
-`TimeoutError`/`IndexError` aliases are removed -- use `AerospikeTimeoutError`/`AerospikeIndexError`.
+`aerospike_py.exception.TimeoutError`/`IndexError` remain as **deprecated aliases** for `AerospikeTimeoutError`/`AerospikeIndexError` and emit a `DeprecationWarning` when accessed — prefer the canonical names in new code.
 
 Detail: `./reference/admin.md`
 
