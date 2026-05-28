@@ -18,7 +18,7 @@ jobs:
   link-check:
     runs-on: ubuntu-latest
     # Transient network failures should not block PRs; the weekly run is the source of truth.
-    continue-on-error: true
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
