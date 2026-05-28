@@ -360,7 +360,7 @@ def resilient_get(client, key, max_retries: int = 3):
 
 ## Exception Hierarchy
 
-All exceptions are importable from `aerospike_py` directly. There is **no** `aerospike_py.exception` submodule (the previous alias was removed).
+All exceptions are importable both from `aerospike_py` directly (e.g. `from aerospike_py import RecordNotFound`) and from `aerospike_py.exception` (e.g. `from aerospike_py.exception import RecordNotFound`). `aerospike_py.exception.TimeoutError` and `aerospike_py.exception.IndexError` are deprecated aliases for `AerospikeTimeoutError` and `AerospikeIndexError` respectively and emit a DeprecationWarning when accessed.
 
 ```
 AerospikeError
