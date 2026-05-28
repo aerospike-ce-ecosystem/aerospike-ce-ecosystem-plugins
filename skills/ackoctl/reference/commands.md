@@ -18,18 +18,18 @@ Read-only. **Run `guide get` before any mutating command** and follow the policy
 | `config view` | Print the merged config (~/.ackoctl/config.yaml). |
 | `config current-context` | Print only the current context name. |
 | `config use-context NAME` | Switch the current context. |
-| `config set-context NAME --server URL --token TOKEN [--workspace WS]` | Create/update a context entry. |
+| `config set-context NAME --server URL --token TOKEN [--workspace-id WS]` | Create/update a context entry. |
 | `config delete-context NAME` | Remove a context entry. |
 
 ## `connection` — cluster-manager connection profiles
 
-`--host` is repeatable (one flag per seed host); `--user`/`--pass` carry auth.
+`--host` is repeatable (one flag per seed host); `--user` + `--password` (or `--password-stdin`) carry auth. `--password` and `--password-stdin` are mutually exclusive.
 
 | Verb | One-liner |
 |------|-----------|
 | `connection list` | List connection profiles in the current workspace. |
 | `connection get ID` | Show a single profile (no password). |
-| `connection create --name N --host H1 [--host H2] --port 3000 [--user U --pass P]` | Create a profile. |
+| `connection create --name N --host H1 [--host H2] --port 3000 [--user U (--password P \| --password-stdin)]` | Create a profile. |
 | `connection update ID [--name ... --host ... --color ... --note ...]` | Patch fields. |
 | `connection delete ID --yes` | Delete a profile. |
 | `connection health ID` | Probe an existing profile's cluster: connected, build, edition, node/namespace counts, memory/disk usage. |

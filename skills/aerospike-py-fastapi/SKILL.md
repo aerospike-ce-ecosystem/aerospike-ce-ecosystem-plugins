@@ -152,7 +152,7 @@ async def aerospike_error_handler(request, exc):
 | `RecordExistsError` | 409 | Record already exists (CREATE_ONLY) |
 | `RecordGenerationError` | 409 | Optimistic lock conflict |
 | `BackpressureError` | 503 | Too many concurrent operations |
-| `AerospikeTimeoutError` | 504 | Operation timed out (canonical name; `TimeoutError` alias removed) |
+| `AerospikeTimeoutError` | 504 | Operation timed out (canonical name; `aerospike_py.exception.TimeoutError` is a deprecated alias) |
 | `AerospikeIndexError` | 400/500 | Secondary index error (400 if user supplied bad query, else 500) |
 | `AerospikeError` | 500 | Catch-all server error |
 
