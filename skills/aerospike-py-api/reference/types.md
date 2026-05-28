@@ -13,11 +13,12 @@
 ```python
 UserKey         = str | int                          # primary key value
 AerospikeRecord = dict[str, Any]                     # bins dict
-BatchRecords    = dict[UserKey, AerospikeRecord]     # batch_read return (TypeAlias)
+BatchRecords    = dict[UserKey, AerospikeRecord]     # dict shape of LazyBatchRecords.to_dict()
 ```
 
-`batch_read()` returns `BatchRecords` (a plain dict — the alias was redefined; it is **not** a NamedTuple).
-Missing keys are simply absent from the dict. NumPy variant `batch_read(_dtype=...)` returns `NumpyBatchRecords` instead.
+`batch_read()` returns a **`LazyBatchRecords` handle** (a deferred-conversion wrapper around the raw Rust results — NOT a dict, NOT a NamedTuple). Materialise via `lazy_records.to_dict()` for the `BatchRecords` shape, or `lazy_records.to_numpy(dtype)` for a zero-copy NumPy structured array (`NumpyBatchRecords`). `LazyBatchRecords` also implements the dict-like Mapping protocol over a lazy + cached `to_dict()` view, so `lazy_records.items()` / `lazy_records["k"]` / `"k" in lazy_records` keep working without an explicit `.to_dict()` call. Missing keys are absent from the dict view.
+
+The legacy `batch_read(..., _dtype=...)` kwarg has been **removed** — use `.to_numpy(dtype)` on the handle instead. `lazy_records.as_dict()` and `LazyBatchRecords.merge_as_dict(...)` remain as forwarding aliases for `to_dict()` / `merge_to_dict(...)`.
 
 Write-style batch methods (`batch_write`, `batch_operate`, `batch_remove`, `batch_write_numpy`) return `BatchWriteResult`, a NamedTuple with `.batch_records: list[BatchRecord]` (see below).
 
@@ -75,15 +76,37 @@ Per-record result from write-style batch operations (`batch_write`, `batch_opera
 | record | Record \| None | Record data (`None` if failed) |
 | in_doubt | bool | `True` if the write may have completed despite the error (e.g., timeout after send). Check before retrying to avoid duplicates with non-idempotent ops. |
 
-### BatchRecords
-`TypeAlias = dict[UserKey, AerospikeRecord]`
+### LazyBatchRecords
 
-The return type of `batch_read()`. **Not** a NamedTuple anymore — it's a plain dict mapping each user key (str | int) to its bins dict. Missing keys are simply absent.
+Returned by sync **and** async `batch_read()`. A zero-conversion handle that wraps the raw Rust results; materialisation is deferred to explicit method calls.
+
+| Method / Operator | Returns | Description |
+|-------------------|---------|-------------|
+| `lazy_records.to_dict()` | `dict[UserKey, AerospikeRecord]` (`= BatchRecords`) | Materialise as `dict[user_key, bins_dict]`. Excludes digest-only and failed records. |
+| `lazy_records.to_numpy(dtype)` | `NumpyBatchRecords` | Materialise as a structured array. `dtype` **must be a real `np.dtype` object** (e.g. `np.dtype([("score","i4")])`). The per-record fill loop runs with the GIL released (`py.detach`), so sibling work (torch inference, other asyncio tasks) can hold the GIL while the buffer fills. |
+| `lazy_records.batch_records` | `list[BatchRecord]` | Compat path: lazy NamedTuple conversion. Includes digest-only and failed records. |
+| `lazy_records.items()` / `keys()` / `values()` | dict views | Dict-style — same semantics as the cached `to_dict()`. |
+| `lazy_records[user_key]` / `user_key in lazy_records` | dict access | Dict-like backward compat. |
+| `len(lazy_records)` | `int` | Number of records visible to the dict view (successful reads with a `user_key`). |
+| `lazy_records.iter_records()` | `Iterator[BatchRecord]` | Iterate every record (including digest-only and failed) in insertion order. |
+| `lazy_records.raw_user_keys()` | `list[UserKey]` | Every batch record's `user_key`, including missing / failed — for positional alignment with `batch_records` or `NumpyBatchRecords`. |
+| `lazy_records.found_count()` | `int` | Count of successful records (no conversion needed). |
+
+Legacy aliases: `as_dict()` → `to_dict()`, `LazyBatchRecords.merge_as_dict(...)` → `LazyBatchRecords.merge_to_dict(...)`. The old `BatchReadHandle` class name was renamed to `LazyBatchRecords`.
 
 ```python
-records = client.batch_read(keys)            # BatchRecords
-for user_key, bins in records.items():
+lazy_records = client.batch_read(keys)                       # LazyBatchRecords handle
+
+# Dict path
+for user_key, bins in lazy_records.items():                  # dict-like
     print(user_key, bins["name"])
+records = lazy_records.to_dict()                             # BatchRecords
+
+# NumPy / torch path (zero-copy)
+import numpy as np
+import torch
+np_batch = lazy_records.to_numpy(np.dtype([("score", "i4")]))
+tensor = torch.from_numpy(np_batch.batch_records["score"])
 ```
 
 ### BatchWriteResult
@@ -149,7 +172,7 @@ Returned by `info_all`. One result per cluster node.
 | `operate()` | `Record` |
 | `operate_ordered()` | `OperateOrderedResult` |
 | `info_all()` | `list[InfoNodeResult]` |
-| `batch_read()` | `BatchRecords` (= `dict[UserKey, AerospikeRecord]`) or `NumpyBatchRecords` with `_dtype=` |
+| `batch_read()` | `LazyBatchRecords` — call `.to_dict()` for `BatchRecords` shape, `.to_numpy(np.dtype([...]))` for `NumpyBatchRecords` |
 | `batch_write()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()` | `BatchWriteResult` (NamedTuple, `.batch_records: list[BatchRecord]`) |
 | `ping()` | `bool` |
 | `Query.results()` | `list[Record]` |
