@@ -35,43 +35,28 @@ def get_client(request: Request) -> AsyncClient:
 
 ## 2. CRUD Endpoints
 
-```python
-from fastapi.responses import JSONResponse
+Key library specifics: exceptions are on the module (`aerospike_py.RecordNotFound`); `record.bins` is attribute access on a NamedTuple (not tuple-unpack); CRUD semantics come from the `exists` policy, not the HTTP verb — `CREATE_ONLY` raises `RecordExistsError`, `UPDATE_ONLY` raises `RecordNotFound`.
 
+```python
 NS, SET = "app", "records"
 
 @app.post("/records/{pk}", status_code=201)
 async def create(pk: str, body: dict, client: AsyncClient = Depends(get_client)):
     try:
-        await client.put((NS, SET, pk), body,
-                         policy={"exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY})
+        await client.put((NS, SET, pk), body, policy={"exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY})
         return {"key": pk}
     except aerospike_py.RecordExistsError:
-        return JSONResponse(status_code=409, content={"error": "already exists"})
+        return JSONResponse(409, {"error": "already exists"})
 
 @app.get("/records/{pk}")
 async def read(pk: str, client: AsyncClient = Depends(get_client)):
     try:
-        record = await client.get((NS, SET, pk))
-        return record.bins                     # NamedTuple attribute access
+        return (await client.get((NS, SET, pk))).bins      # NamedTuple attribute access
     except aerospike_py.RecordNotFound:
-        return JSONResponse(status_code=404, content={"error": "not found"})
+        return JSONResponse(404, {"error": "not found"})
 
-@app.put("/records/{pk}")
-async def update(pk: str, body: dict, client: AsyncClient = Depends(get_client)):
-    try:
-        await client.put((NS, SET, pk), body,
-                         policy={"exists": aerospike_py.POLICY_EXISTS_UPDATE_ONLY})
-        return {"key": pk}
-    except aerospike_py.RecordNotFound:
-        return JSONResponse(status_code=404, content={"error": "not found"})
-
-@app.delete("/records/{pk}", status_code=204)
-async def delete(pk: str, client: AsyncClient = Depends(get_client)):
-    try:
-        await client.remove((NS, SET, pk))
-    except aerospike_py.RecordNotFound:
-        return JSONResponse(status_code=404, content={"error": "not found"})
+# update: same as create but policy={"exists": aerospike_py.POLICY_EXISTS_UPDATE_ONLY} -> RecordNotFound -> 404
+# delete: await client.remove((NS, SET, pk)) -> RecordNotFound -> 404
 ```
 
 ## 2b. Batch Endpoints

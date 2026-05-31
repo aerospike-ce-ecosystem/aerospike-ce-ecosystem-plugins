@@ -95,6 +95,8 @@ Top-level statuses:
 - `Failed`: Phase 1 validation rejected, OR phase 2 apply failed and rollback succeeded; set `enableDynamicConfigUpdate: false` to force rolling restart
 - `Pending`: Change is being applied
 
+**Removing** a config key (not just changing it) always forces a rolling restart, even for an otherwise-dynamic param — "revert to server default" cannot be expressed as `set-config`.
+
 If phase 2 apply AND rollback both fail, the cluster enters `phase=ConfigDegraded` and `ConditionDynamicConfigDegraded=True`. The operator will cold-restart on the next reconcile to converge to spec — do not manually toggle `enableDynamicConfigUpdate` during this window.
 
 Example status snapshot of a partial rollback:
@@ -126,7 +128,7 @@ spec:
 
 ## 3. On-Demand Restart
 
-Only one operation at a time. Remove from spec after completion.
+Only one operation at a time. Remove from spec after completion. Batches gate on the same readiness-gate / migration guard as rolling restarts (a batch may pause until pods rejoin or migrations drain). The op goes to `status.operation.phase=Error` (not silent Completed) on an unknown `kind` or when `podList` names no existing pod.
 
 ### WarmRestart (SIGUSR1)
 

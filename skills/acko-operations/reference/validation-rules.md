@@ -14,6 +14,9 @@ Canonical catalog of ACKO webhook validation errors and non-blocking warnings. T
 | `spec.size == 0` + no templateRef | `"spec.size must be set (1-8) when spec.templateRef is not specified"` |
 | `spec.image` empty + no templateRef | `"spec.image must not be empty when spec.templateRef is not specified"` |
 | Image contains `enterprise`/`ee-`/`ent-` | `"spec.image \"...\" is an Enterprise Edition image; only Community Edition images are allowed"` |
+| CE image below major 8 (incl. dotless tags `ce-7`, `7`) | error contains `"requires Aerospike CE"` |
+
+Image tag parsing (#321) uses the last colon after the final `/` and strips `@sha256:` digests, so enterprise/CE-version guards also apply to ported-registry (`myregistry.io:5000/aerospike:...`) and digest-pinned refs.
 
 ### Aerospike Config
 
@@ -27,7 +30,8 @@ Canonical catalog of ACKO webhook validation errors and non-blocking warnings. T
 | `network` not a map | `"aerospikeConfig.network must be a map"` |
 | `logging` not a list | `"aerospikeConfig.logging must be a list"` |
 | namespace entry not a map with `name` | `"aerospikeConfig.namespaces[N] must be a map with required key 'name'"` |
-| Rack ID add+remove in single update | `"rackConfig: rack IDs cannot be added and removed in the same update (rename-like change risks data loss)"` |
+| Duplicate namespace name | `"aerospikeConfig.namespaces[N]: duplicate namespace name \"name\"; each namespace must have a unique name"` |
+| Rack ID add+remove in single update (also fires when `rackConfig` is dropped entirely → implicit rack 0) | `"rackConfig: rack IDs cannot be added and removed in the same update (rename-like change risks data loss)"` |
 | `MetricLabels` value contains control chars | `"monitoring.metricLabels[\"key\"]: control characters are not permitted in TOML output"` |
 
 ### Enterprise-Only Namespace Keys (10)
@@ -48,6 +52,17 @@ Allowed CE security keys: `enable-security`, `default-password-file`
 
 Error: `"aerospikeConfig.security.KEY is not allowed in CE edition (reason)"`
 
+`security` must also be a map: `"aerospikeConfig.security must be a map, got T"`.
+
+### Enterprise-Only Logging Contexts (8)
+
+`logging` must be a list of map entries, each with a non-empty `name` key. These enterprise-only context keys are rejected on CE (they crash aerospikd at startup with "unknown context"):
+
+`audit`, `report-data-op`, `report-data-op-user`, `report-data-op-role`, `report-sys-admin`, `report-user-admin`, `report-violation`, `report-authentication`
+
+Error: `"aerospikeConfig.logging[N].KEY is not allowed in CE edition (reason)"`
+Malformed entries: `"aerospikeConfig.logging[N] must be a map, got T"` / `"...[N] is missing the required 'name' key"` / `"...[N].name must be a non-empty string, got T"`
+
 ### Namespace Validation
 
 | Rule | Error Message |
@@ -66,10 +81,14 @@ Error: `"aerospikeConfig.security.KEY is not allowed in CE edition (reason)"`
 | Reference to undefined role | `"user \"name\" references undefined role \"role\""` |
 | Invalid privilege code | `"role \"name\" has invalid privilege code \"code\""` |
 | Privilege with leading/trailing whitespace | `"role \"name\" privileges[N]: privilege string \"...\" must not have leading or trailing whitespace"` |
+| Scope on a global-only privilege (`sys-admin`/`user-admin`/`data-admin`) | `"role \"name\" privilege \"...\": \"code\" is a global-only privilege and cannot be scoped to a namespace or set (\"scope\")"` |
+| Malformed scope: empty namespace (`read.`, `read..set`) | `"role \"name\" privilege \"...\": namespace scope must not be empty"` |
+| Malformed scope: empty set (`read.ns.`) | `"role \"name\" privilege \"...\": set scope must not be empty"` |
+| Malformed scope: >2 components (`read.ns.set.extra`) | `"role \"name\" privilege \"...\": scope must be \"<namespace>\" or \"<namespace>.<set>\", got N components"` |
 
 Valid privilege codes: `read`, `write`, `read-write`, `read-write-udf`, `sys-admin`, `user-admin`, `data-admin`, `truncate`
 
-Privilege format: `"<code>"` / `"<code>.<namespace>"` / `"<code>.<namespace>.<set>"`
+Privilege format: `"<code>"` / `"<code>.<namespace>"` / `"<code>.<namespace>.<set>"`. Admin codes (`sys-admin`/`user-admin`/`data-admin`) are global-only — they reject any scope. Unscoped+malformed scopes are caught at admission because Aerospike rejects them at role-sync time (→ `ACLSyncError`).
 
 ### Rack Config Validation
 
@@ -81,6 +100,9 @@ Privilege format: `"<code>"` / `"<code>.<namespace>"` / `"<code>.<namespace>.<se
 | Duplicate nodeName | `"racks[N] and racks[M] both constrained to node \"name\""` |
 | Invalid IntOrString | `"rackConfig.scaleDownBatchSize must be a positive integer or percentage"` |
 | Rack ID changed on update | `"rackConfig rack IDs cannot be changed"` |
+| Per-rack `aerospikeConfig` override violates a CE constraint | `"rackConfig.racks[id=N].aerospikeConfig: <inner CE error>"` |
+
+A rack's `aerospikeConfig` is DeepMerged into the effective config, so it is validated against the **same** CE constraints as cluster-level config (xdr/tls/security keys, >2 namespaces, mesh-only heartbeat). Prevents a CE bypass via per-rack override.
 
 ### Storage Validation
 
@@ -102,6 +124,18 @@ Privilege format: `"<code>"` / `"<code>.<namespace>"` / `"<code>.<namespace>.<se
 | exporterImage empty when enabled | `"monitoring.exporterImage must not be empty when monitoring is enabled"` |
 | metricLabels contain `=` or `,` | `"monitoring.metricLabels key/value must not contain '=' or ','"` |
 | customRules missing name/rules | `"customRules[N]: missing required field 'name'/'rules'"` |
+| `serviceMonitor.interval` not a Prometheus duration (e.g. `"5 seconds"`) | `"monitoring.serviceMonitor.interval \"...\" is not a valid Prometheus duration ..."` |
+| Invalid K8s label on `serviceMonitor.labels`/`prometheusRule.labels` | `"monitoring.serviceMonitor.labels key \"k\" is not a valid Kubernetes label key: ..."` / `"...labels[\"k\"] value \"v\" is not a valid Kubernetes label value: ..."` |
+
+These are validated because the reconciler copies them verbatim onto the ServiceMonitor/PrometheusRule; the Prometheus Operator / API server would otherwise reject them at apply time, leaving monitoring silently broken.
+
+### MaxUnavailable Validation
+
+| Rule | Error Message |
+|------|--------------|
+| `maxUnavailable` malformed (negative int, non-percentage string) | error contains `"maxUnavailable"` |
+
+(Structural rejection at admission, in addition to the non-blocking "no disruption protection" warning below. Skipped when size is deferred to a templateRef.)
 
 ### Operations Validation
 
@@ -110,7 +144,7 @@ Privilege format: `"<code>"` / `"<code>.<namespace>"` / `"<code>.<namespace>.<se
 | More than 1 operation | `"only one operation can be specified at a time"` |
 | ID length outside 1-20 chars | `"operation id must be 1-20 characters"` |
 | Invalid `kind` | `"operation kind must be one of: WarmRestart, PodRestart"` |
-| Change during InProgress | `"cannot change operations while operation \"ID\" is InProgress"` |
+| Change during InProgress (incl. changing `podList`) | `"cannot change operations while operation \"ID\" is InProgress"` |
 
 ### Update-Only Validation
 
@@ -129,8 +163,8 @@ These produce `ValidationWarning` events but do not reject the CR.
 | Image tag missing or `latest` | Use an explicit version tag for reproducibility |
 | Exporter image `latest` or no tag | Use an explicit version tag |
 | `data-in-memory=true` | Memory usage may double (data cached in RAM + on disk) |
-| `rollingUpdateBatchSize > spec.size` | All pods may restart simultaneously |
-| `maxUnavailable >= spec.size` or `100%` | PDB provides no disruption protection |
+| `rollingUpdateBatchSize > spec.size` | All pods may restart simultaneously (suppressed when size deferred to templateRef) |
+| `maxUnavailable >= spec.size` or `100%` | PDB provides no disruption protection (suppressed when size deferred to templateRef) |
 | hostPath volume used | Not recommended for production; data is node-bound |
 | cascadeDelete on non-PV volume | Has no effect on emptyDir or hostPath volumes |
 | No PV for work-directory | Data loss possible on pod restart |

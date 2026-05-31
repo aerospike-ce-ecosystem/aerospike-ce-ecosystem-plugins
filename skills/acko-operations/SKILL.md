@@ -142,6 +142,8 @@ Top-level statuses:
 - `Failed`: Phase 1 validation rejected the change on at least one pod, OR phase 2 apply failed and rollback succeeded. Set `enableDynamicConfigUpdate: false` to force a rolling restart.
 - `Pending`: Change is being applied.
 
+**Removing** a config key always forces a rolling restart (even for a dynamic param) — reverting to the server default cannot be expressed as `set-config`.
+
 ### When apply AND rollback both fail
 
 You will see `phase = ConfigDegraded`. Do NOT try to "fix" it by toggling `enableDynamicConfigUpdate` — the operator will cold-restart the pods on the next reconcile to reach a consistent state. See the `acko-debugging` skill for the full recovery flow.
@@ -166,7 +168,9 @@ On-demand restart of pods. Only one operation at a time. Remove the operation fr
 **Constraints (webhook-enforced):**
 - `kind` must be one of `WarmRestart` (SIGUSR1) or `PodRestart` (delete + recreate). No other values are accepted.
 - `id` must be 1–20 characters, unique-per-cluster.
-- The operations list cannot be modified while an operation has `status.operation.phase = InProgress` — wait for it to complete (or fail) before queueing another.
+- The operations list cannot be modified (including changing `podList`) while an operation has `status.operation.phase = InProgress` — wait for it to complete (or fail) before queueing another.
+
+**Controller semantics:** the op terminates as `phase=Error` (not silent Completed) on an unknown `kind` or when `podList` names no existing pod. Batches gate on the readiness-gate / migration guard like rolling restarts, so a batch may legitimately pause.
 
 ### Warm Restart (SIGUSR1)
 

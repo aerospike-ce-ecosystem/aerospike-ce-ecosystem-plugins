@@ -28,33 +28,11 @@ The `ackoctl` skill covers install and configuration in full.
 
 ## Cluster selection
 
-Many users run multi-cluster ACKO. The user's wording usually indicates which cluster — phrases like "in dev", "production EU", "the prod-us cluster". Map the named cluster to the configured ackoctl context:
-
-| User says | ackoctl context used |
-|-----------|----------------------|
-| "in dev" / "local" / "my workstation" | `--context=kind-local` (or whatever is the current-context) |
-| "in staging" | `--context=staging` |
-| "in prod-us" / "production US" | `--context=prod-us` |
-
-When multiple contexts could match or none is named, list configured contexts (`ackoctl config view -o yaml`) and ask the user to disambiguate. Below, replace `{ctx}` with the resolved context name — or omit `--context` to use the current-context.
+Map the user's wording ("in dev", "prod-us") to the configured ackoctl context via `--context=<name>`; if ambiguous or unnamed, list `ackoctl config view -o yaml` and ask. Below, `{ctx}` is the resolved context (omit `--context` for current-context).
 
 ## Mutation commands — confirm before invoking
 
-These ackoctl invocations mutate cluster state. Always confirm with the user before running them — the workspace ACL on the server is the safety net, but blast radius is the user's call:
-
-| Command | Blast radius |
-|---------|--------------|
-| `ackoctl record put` / `record delete` | Single-record write/delete |
-| `ackoctl cluster configure-namespace` | Runtime config change on the live cluster (`asinfo set-config`) |
-| `ackoctl info --allow-write` | Raw asinfo with mutation verbs (`set-config:`, `recluster:`) |
-| `ackoctl index create` / `index delete` | Server-side index DDL |
-| `ackoctl k8s cluster scale` | Patches `spec.size` on the AerospikeCluster CR — same blast radius as `kubectl patch` |
-| `ackoctl k8s cluster reconcile` | Stamps `acko.io/force-reconcile`; triggers operator reconciliation |
-| `ackoctl udf upload` / `udf remove` | Cluster-wide UDF module change |
-| `ackoctl admin user/role *` | Identity changes (security-enabled clusters only) |
-| `ackoctl connection delete` | Removes the profile **and** cascades all attached notes |
-
-For diagnostic reads, prefer the no-side-effect verbs: `ackoctl k8s cluster get`, `ackoctl info` without `--allow-write` (whitelisted read verbs only), `ackoctl query exec`, `ackoctl record get`.
+Confirm with the user before any state-mutating ackoctl call (blast radius is theirs to approve): `record put`/`delete`, `cluster configure-namespace`, `info --allow-write` (`set-config:`/`recluster:`), `index create`/`delete`, `k8s cluster scale`/`reconcile`, `udf upload`/`remove`, `admin user/role *`, `connection delete` (cascades attached notes). Prefer the no-side-effect read verbs for diagnosis: `k8s cluster get`, `info` (no `--allow-write`), `query exec`, `record get`.
 
 ## Debugging procedure
 
@@ -95,17 +73,7 @@ ackoctl --context={ctx} k8s cluster logs <ns>/<name> --pod=<pod> --container=aer
 
 The CR phase, size, conditions, and migration status are all in the `k8s cluster get` payload — no need to shell out for every field.
 
-**`kubectl` fallback** (when cluster-manager's K8s tools are not exposed, or when fields the summary does not surface yet are needed):
-
-```bash
-kubectl get asc -n <ns>
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.phase}'
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.phaseReason}'
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.conditions}' | jq .
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.size}'
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.migrationStatus}' | jq .
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.aerospikeClusterSize}'
-```
+**`kubectl` fallback** (when K8s tools aren't exposed): `kubectl get asc <name> -n <ns> -o jsonpath='{.status.phase}'` (or `.phaseReason` / `.conditions` / `.size` / `.migrationStatus` / `.aerospikeClusterSize`).
 
 ### Step 2 — Branch based on phase
 
@@ -113,16 +81,27 @@ kubectl get asc <name> -n <ns> -o jsonpath='{.status.aerospikeClusterSize}'
 
 ```bash
 kubectl get asc <name> -n <ns> -o jsonpath='{.status.lastReconcileError}'
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.failedReconcileCount}'
 kubectl get events -n <ns> --field-selector involvedObject.name=<name> --sort-by='.lastTimestamp' | tail -20
 ```
 
-Check for:
-- Invalid `aerospikeConfig` (config parse errors)
-- Image pull failures (wrong image name or registry access)
-- Resource quota exceeded
-- Webhook validation failures
-- Circuit breaker activation (`failedReconcileCount >= 10`)
+Check for invalid `aerospikeConfig` (parse errors), image pull failures, resource quota, webhook failures. **Note:** the reconcile circuit breaker surfaces as `phase=BackoffActive` (not `Error`) — see below.
+
+#### If Phase = `BackoffActive` (circuit breaker)
+
+```bash
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.conditions[?(@.type=="ReconcileHealthy")]}' | jq
+```
+
+- `ReconcileHealthy=True` → transient (pod not ready, image pull, capacity); auto-retries with backoff.
+- `ReconcileHealthy=False, reason=PermanentError` → validation/configgen/Secret error; no retry. Fix the root cause, then toggle `spec.paused: true → null` (clears stale `failedReconcileCount`/`lastReconcileError`) or edit the spec.
+
+#### If Phase = `ACLSync` (stuck)
+
+ACL sync is failing — the cluster does **not** reach `Completed` while ACL is unsynced; it requeues ~30s. Check the `ACLSynced` condition, `ACLSyncError` event, and that the password Secret exists with the right key.
+
+```bash
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.conditions[?(@.type=="ACLSynced")]}' | jq
+```
 
 #### If Phase = `WaitingForMigration`
 
@@ -241,11 +220,11 @@ kubectl get events -n <ns> --field-selector involvedObject.name=<name> --sort-by
 ```
 
 Key events to look for:
-- `CircuitBreakerActive`: 10+ consecutive failures, operator in backoff
+- `CircuitBreakerActive`: failure threshold reached → `phase=BackoffActive`, `acko_circuit_breaker_active=1`
 - `RestartFailed`: pod restart failed during rolling update
 - `ScaleDownDeferred`: migration blocking scale-down
 - `DynamicConfigStatusFailed`: dynamic config change failed
-- `ACLSyncError`: ACL synchronization failed
+- `ACLSyncError`: ACL synchronization failed (→ `phase=ACLSync`, not Completed)
 - `TemplateResolutionError`: template parsing failed
 - `ReadinessGateBlocking`: readiness gate not satisfied
 
@@ -267,23 +246,17 @@ After identifying the root cause, suggest the specific fix:
 | Image pull failure | Fix image name or add imagePullSecret |
 | PVC Pending | Check StorageClass exists and has capacity |
 | Resource insufficient | Reduce resource requests or add nodes to K8s cluster |
-| CE constraint violation | Fix CR to comply (size ≤ 8, namespaces ≤ 2, no xdr/tls, CE image) |
-| Circuit breaker active | Fix root cause; operator auto-retries with backoff |
+| CE constraint violation | Fix CR to comply (size ≤ 8, namespaces ≤ 2, no xdr/tls, CE image ≥ ce-8) |
+| `BackoffActive` (transient) | Fix root cause; operator auto-retries with backoff |
+| `BackoffActive` + `ReconcileHealthy=False/PermanentError` | Fix root cause, then toggle `paused: true → null` or edit spec |
 | Dynamic config failed | Set `enableDynamicConfigUpdate: false` for rolling restart |
 | Split cluster | Verify network connectivity, check `cluster-name` consistency. Compare `status.aerospikeClusterSize` with `status.size` |
 | Stop writes | Increase storage capacity or reduce data volume |
-| ACL sync error | Verify Secret exists with correct password key |
-| Operations stuck | Clear operations: `kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"operations":null}}'` |
+| ACL sync error (`phase=ACLSync`) | Verify Secret exists with correct password key; check role scopes are valid |
+| On-demand op `Error` | Unknown `kind` or `podList` names no existing pod → fix/clear: `kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"operations":null}}'` |
 
 ## CE 8.1 common pitfalls
 
-Always check for these CE 8.1-specific issues:
-
-1. **`info` port block in config** — removed in 8.1. Causes parse error. Use `admin { port 3008 }` instead.
-2. **`memory-size` used** — removed. Use `storage-engine memory { data-size N }` with integer bytes.
-3. **`write-block-size` used** — replaced by `flush-size` in 7.1+.
-4. **`data-size` below 512 MiB** — minimum is 536870912 bytes.
-5. **`nsup-period=0` with `default-ttl!=0`** — server fails to start.
-6. **Byte values as strings** — all sizes in `aerospikeConfig` must be integer bytes, not `"4G"` or `"1M"`.
+CrashLoopBackOff on a CE 8.1 config almost always traces to one of: `info { port }` block (removed — use `admin { port 3008 }`), `memory-size` (use `storage-engine memory { data-size N }`), `write-block-size` (use `flush-size`), `data-size` < 536870912 (512 MiB), `nsup-period=0` with `default-ttl!=0`, or byte values as strings (must be integer bytes). Full table: `acko-config-reference/reference/breaking-changes-7x-to-8.md`.
 
 Report the root cause with the command output that proves it, then the remediation commands.
