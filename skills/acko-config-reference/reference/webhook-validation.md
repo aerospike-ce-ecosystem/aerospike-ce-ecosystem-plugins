@@ -7,15 +7,18 @@
 The ACKO webhook rejects CRs that violate these constraints:
 
 - `size > 8` -> rejected
-- `namespaces > 2` -> rejected
-- Image contains `enterprise`/`ee-`/`ent-` -> rejected
+- `namespaces > 2` -> rejected; duplicate namespace name -> rejected
+- Image contains `enterprise`/`ee-`/`ent-` -> rejected; CE image major `< 8` (incl. dotless `ce-7`/`7`) -> rejected
 - `xdr` or `tls` section present -> rejected
-- `security` present without `aerospikeAccessControl` -> rejected
+- Enterprise `security` keys (`tls`/`ldap`/`log`/`syslog`) or logging contexts (`audit`/`report-*`) -> rejected
 - Admin user missing `sys-admin` + `user-admin` -> rejected
+- Admin privilege (`sys-admin`/`user-admin`/`data-admin`) with a `.namespace`/`.set` scope, or a malformed scope -> rejected
+- Per-rack `aerospikeConfig` override violating any CE constraint -> rejected
+- Exact error strings + full catalog: `acko-operations/reference/validation-rules.md`
 
-## Strengthened map/list validation (April 2026)
+## Map/list shape rules
 
-The webhook now also rejects CRs that violate these structural rules — preventing permanent configgen failures from reaching the running pod:
+Structural rules rejected at admission (so a bad apply fails fast instead of CrashLoopBackOff):
 
 | Field | Required shape | Common mistake |
 |-------|----------------|----------------|
@@ -27,8 +30,6 @@ The webhook now also rejects CRs that violate these structural rules — prevent
 | `aerospikeConfig...metricLabels[*]` | values must be TOML-quotable: control characters (`\x00`-`\x1F`, `\x7F`) rejected | unescaped newline or tab in label value |
 | `spec.operations[]` | id length 1-20; kind ∈ {`WarmRestart`, `PodRestart`}; cannot modify while one is `InProgress` | reusing an id, or editing operations spec mid-flight |
 | `spec.overrides` | only valid when `spec.templateRef` is set | trying to use overrides on an inline-spec cluster |
-
-These run at admission time, so a bad apply fails fast with a clear webhook error rather than entering CrashLoopBackOff later.
 
 ## Byte Values in CRD YAML
 

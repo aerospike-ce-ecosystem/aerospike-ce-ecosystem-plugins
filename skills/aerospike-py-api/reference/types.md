@@ -16,9 +16,9 @@ AerospikeRecord = dict[str, Any]                     # bins dict
 BatchRecords    = dict[UserKey, AerospikeRecord]     # dict shape of LazyBatchRecords.to_dict()
 ```
 
-`batch_read()` returns a **`LazyBatchRecords` handle** (a deferred-conversion wrapper around the raw Rust results — NOT a dict, NOT a NamedTuple). Materialise via `lazy_records.to_dict()` for the `BatchRecords` shape, or `lazy_records.to_numpy(dtype)` for a zero-copy NumPy structured array (`NumpyBatchRecords`). `LazyBatchRecords` also implements the dict-like Mapping protocol over a lazy + cached `to_dict()` view, so `lazy_records.items()` / `lazy_records["k"]` / `"k" in lazy_records` keep working without an explicit `.to_dict()` call. Missing keys are absent from the dict view.
+`batch_read()` returns a **`LazyBatchRecords` handle** (deferred-conversion wrapper around raw Rust results — NOT a dict, NOT a NamedTuple). Materialise via `.to_dict()` (→ `BatchRecords`) or `.to_numpy(dtype)` (→ `NumpyBatchRecords`). It also implements the dict-like Mapping protocol over a cached `to_dict()` view, so `.items()` / `["k"]` / `"k" in handle` work without `.to_dict()`. Missing keys are absent from the dict view.
 
-The legacy `batch_read(..., _dtype=...)` kwarg has been **removed** — use `.to_numpy(dtype)` on the handle instead. `lazy_records.as_dict()` and `LazyBatchRecords.merge_as_dict(...)` remain as forwarding aliases for `to_dict()` / `merge_to_dict(...)`.
+**Removed (BREAKING):** the `batch_read(..., _dtype=...)` kwarg (use `.to_numpy(dtype)`); the transitional `as_dict()` / `merge_as_dict()` aliases (use `to_dict()` / `merge_to_dict()`). The old `BatchReadHandle` class was renamed `LazyBatchRecords`.
 
 Write-style batch methods (`batch_write`, `batch_operate`, `batch_remove`, `batch_write_numpy`) return `BatchWriteResult`, a NamedTuple with `.batch_records: list[BatchRecord]` (see below).
 
@@ -85,14 +85,15 @@ Returned by sync **and** async `batch_read()`. A zero-conversion handle that wra
 | `lazy_records.to_dict()` | `dict[UserKey, AerospikeRecord]` (`= BatchRecords`) | Materialise as `dict[user_key, bins_dict]`. Excludes digest-only and failed records. |
 | `lazy_records.to_numpy(dtype)` | `NumpyBatchRecords` | Materialise as a structured array. `dtype` **must be a real `np.dtype` object** (e.g. `np.dtype([("score","i4")])`). The per-record fill loop runs with the GIL released (`py.detach`), so sibling work (torch inference, other asyncio tasks) can hold the GIL while the buffer fills. |
 | `lazy_records.batch_records` | `list[BatchRecord]` | Compat path: lazy NamedTuple conversion. Includes digest-only and failed records. |
-| `lazy_records.items()` / `keys()` / `values()` | dict views | Dict-style — same semantics as the cached `to_dict()`. |
+| `lazy_records.items()` / `keys()` / `values()` / `get()` | dict views | Dict-style — same semantics as the cached `to_dict()`. |
 | `lazy_records[user_key]` / `user_key in lazy_records` | dict access | Dict-like backward compat. |
-| `len(lazy_records)` | `int` | Number of records visible to the dict view (successful reads with a `user_key`). |
+| `len(lazy_records)` | `int` | Dict-view cardinality (successful reads with a `user_key`); pure-Rust count, no PyDict build. |
 | `lazy_records.iter_records()` | `Iterator[BatchRecord]` | Iterate every record (including digest-only and failed) in insertion order. |
-| `lazy_records.raw_user_keys()` | `list[UserKey]` | Every batch record's `user_key`, including missing / failed — for positional alignment with `batch_records` or `NumpyBatchRecords`. |
+| `lazy_records.all_user_keys()` | `list[UserKey \| None]` | Every record's `user_key` in request order (positionally aligned with `batch_records` / `NumpyBatchRecords`; `None` for digest-only requests). |
 | `lazy_records.found_count()` | `int` | Count of successful records (no conversion needed). |
+| `lazy_records.release_cache()` | `None` | Drop the cached `to_dict()` PyDict, keeping raw records. |
 
-Legacy aliases: `as_dict()` → `to_dict()`, `LazyBatchRecords.merge_as_dict(...)` → `LazyBatchRecords.merge_to_dict(...)`. The old `BatchReadHandle` class name was renamed to `LazyBatchRecords`.
+`merge_to_dict([h1, h2, ...])` is a static single-GIL merge. (No `as_dict`/`merge_as_dict`/`raw_user_keys` — those names do not exist.)
 
 ```python
 lazy_records = client.batch_read(keys)                       # LazyBatchRecords handle
@@ -299,11 +300,11 @@ Import from `aerospike_py._types`.
 
 Required keys:
 - `op` (int): Operation code -- `OPERATOR_READ`, `OPERATOR_WRITE`, `OPERATOR_INCR`, `OPERATOR_APPEND`, `OPERATOR_PREPEND`, `OPERATOR_TOUCH`, `OPERATOR_DELETE`, or CDT codes (1000+).
-- `bin` (str): Bin name to operate on.
-- `val` (Any): Value for write operations; `None` for read ops.
+- `bin` (str): Bin name to operate on (non-empty).
+- `val` (Any): Value for write operations; `None` for read ops. For `OPERATOR_INCR`, `val` must be `int`/`float` (else `TypeError`).
 
 Optional keys (CDT operations):
-- `return_type` (int): `LIST_RETURN_*` or `MAP_RETURN_*` constant.
+- `return_type` (int): `LIST_RETURN_*` (list ops) or `MAP_RETURN_*` (map ops); wrong-family/out-of-range → `ValueError`.
 - `list_policy` (ListPolicy): Policy for list CDT operations.
 - `map_policy` (MapPolicy): Policy for map CDT operations.
 - `hll_policy` (HLLPolicy): Policy for HyperLogLog CDT operations.

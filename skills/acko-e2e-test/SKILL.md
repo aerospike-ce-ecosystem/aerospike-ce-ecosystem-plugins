@@ -88,6 +88,7 @@ PASS when (currently asserted via the in-tree Ginkgo suite, scheduled for split 
 
 - `size > 8` is rejected
 - `namespaces > 2` is rejected
+- duplicate namespace name, CE image `< ce-8` (incl. dotless `ce-7`), enterprise logging context (`audit`/`report-*`), scoped admin privilege (`sys-admin.ns`), malformed ACL scope, invalid `serviceMonitor.interval`/labels, and per-rack `aerospikeConfig` CE violations are all rejected (see `acko-operations/reference/validation-rules.md`)
 - `network.tls`, `xdr`, enterprise images (`aerospike-server-enterprise`), `feature-key-file` are rejected
 - A duplicate `ServiceMonitor` when `monitoring.enabled=true` is rejected (#235)
 
@@ -245,7 +246,7 @@ On failure, `conftest.py`'s `pytest_runtest_makereport` hook automatically calls
 | `kind create cluster` hangs on macOS | Podman machine not running | `podman machine start && podman system service --time=0 &` |
 | Operator pod `ImagePullBackOff` for `controller:latest` | Image not loaded into Kind | re-run `bash scripts/kind-up.sh` |
 | `phase=Error` on first reconcile, no useful logs | Webhook rejected CR (server-side apply ate the message) | `kubectl get events -n <ns>` — webhook errors land there as Warning |
-| `phase=BackoffActive` (not Error, not Completed) | Reconciliation Circuit Breaker tripped | inspect `.status.conditions[?(@.type=="ReconcileBackoff")]`; reset by editing the CR or restarting operator |
+| `phase=BackoffActive` (not Error, not Completed) | Reconciliation Circuit Breaker tripped | inspect `.status.conditions[?(@.type=="ReconcileHealthy")]`; reset by editing the CR or toggling `paused: true → null` |
 | `helm template` fails for `ingress.target=web` + `web.enabled=false` | Chart's intentional failfast (since #236) | set `ui.ingress.target=api` or enable web |
 | e2e passes locally, fails in CI | Different `CONTAINER_TOOL` (Docker vs Podman) | confirm CI sets `CONTAINER_TOOL=podman KIND_PROVIDER=podman` |
 | Collector image `0.115.0` not found on docker.io | Tag rotated out of registry | `tests/observability/test_otel_runtime.py` auto-falls back to `$COLLECTOR_IMAGE` (defaults to `:latest`) and reloads |

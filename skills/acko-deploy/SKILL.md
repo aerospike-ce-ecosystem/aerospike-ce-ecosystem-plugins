@@ -13,14 +13,9 @@ Deploy Aerospike Community Edition clusters on Kubernetes using the ACKO operato
 
 ### Step 1: Check Prerequisites — or Install the Operator
 
-The operator must be running and the CRD installed:
+Operator running + CRD installed: `kubectl get pods -n aerospike-operator -l control-plane=controller-manager` and `kubectl api-resources | grep aerospikeclusters`.
 
-```bash
-kubectl get pods -n aerospike-operator -l control-plane=controller-manager
-kubectl api-resources | grep aerospikeclusters
-```
-
-**Installing the operator (Helm).** ACKO ships as an OCI Helm chart that bundles the operator + webhook and the Cluster Manager UI (`api` + `web` Deployments) — all enabled by default. cert-manager must be installed first (it provisions the webhook TLS certificate):
+**Installing the operator (Helm).** ACKO ships as an OCI Helm chart bundling operator + webhook + Cluster Manager UI (`api` + `web`), all enabled by default. cert-manager must be installed first (provisions the webhook TLS cert):
 
 ```bash
 helm repo add jetstack https://charts.jetstack.io && helm repo update jetstack
@@ -31,32 +26,19 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
   -n aerospike-operator --create-namespace
 ```
 
-The UI `api` pod persists cluster connection metadata (not Aerospike data) in a database. The default backend is an embedded **SQLite** file on a 1Gi PVC — zero extra infrastructure. The chart **never deploys PostgreSQL itself**. Reach the UI (the web frontend listens on 3100):
+The UI `api` pod stores connection metadata (not Aerospike data). Default backend is embedded **SQLite** on a 1Gi PVC; the chart **never deploys PostgreSQL**. UI web frontend listens on 3100 (`kubectl port-forward svc/acko-aerospike-ce-kubernetes-operator-ui-web 3100:3100`).
 
-```bash
-kubectl -n aerospike-operator port-forward svc/acko-aerospike-ce-kubernetes-operator-ui-web 3100:3100
-```
-
-Common install variants:
+ACKO-specific install variants:
 
 | Goal | Flags |
 |------|-------|
 | Operator only, no UI | `--set ui.api.enabled=false --set ui.web.enabled=false` |
-| External PostgreSQL (HA / multi-replica) | `--set ui.database.type=postgresql --set ui.database.postgresql.databaseUrl="postgresql://user:pass@host:5432/aerospike_manager"` |
+| External PostgreSQL (HA) | `--set ui.database.type=postgresql --set ui.database.postgresql.databaseUrl="postgresql://..."` (or `...existingSecret`) |
 | CRDs managed separately (GitOps) | `--set crds.install=false` |
 
-SQLite is single-writer, so the chart pins `ui.replicaCount=1` and **fails the install if you raise it**. For an HA / multi-replica UI, point `ui.database.type=postgresql` at an **external** managed database (RDS / Cloud SQL / AlloyDB) — or supply its URL via `ui.database.postgresql.existingSecret`. The chart does not run PostgreSQL for you. Full value reference: ACKO docs → Reference → Helm Values.
+SQLite is single-writer, so the chart pins `ui.replicaCount=1` and **fails the install if raised** — use external PostgreSQL for a multi-replica UI.
 
-**OpenTelemetry export (operator).** Off by default. To export the operator's reconcile traces, metrics, and logs to an OTLP/gRPC collector, set **both** `observability.otel.enabled=true` and a non-empty `observability.otel.endpoint`:
-
-```bash
-helm upgrade --install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  -n aerospike-operator --create-namespace \
-  --set observability.otel.enabled=true \
-  --set observability.otel.endpoint=otel-collector.observability.svc.cluster.local:4317
-```
-
-`endpoint` alone does nothing (telemetry stays off); `enabled=true` without an `endpoint` fails chart rendering. The operator exports **OTLP/gRPC only** — a scheme-less `host:port` is normalized to `http://`, so pass `https://` explicitly for a TLS collector. When `networkPolicy.enabled` / `cilium.enabled` is set, the chart **auto-adds** the collector egress rule (`observability.otel.collectorPort`, default `4317`) — without it the locked-down egress silently drops all telemetry. The chart never deploys a collector itself. See **acko-operations** for enabling/verifying OTel on a running cluster.
+**OpenTelemetry export (operator).** Off by default; needs **both** `observability.otel.enabled=true` AND a non-empty `observability.otel.endpoint` (either alone is inert / fails rendering). Exports **OTLP/gRPC only** — scheme-less `host:port` is normalized to `http://`, so pass `https://` for a TLS collector. With `networkPolicy.enabled`/`cilium.enabled`, the chart auto-adds the collector egress rule (`observability.otel.collectorPort`, default `4317`). The chart never deploys a collector. See **acko-operations** for runtime enable/verify.
 
 ### Step 2: Apply the Minimal CR
 
@@ -113,6 +95,11 @@ These constraints are enforced by the ACKO validating webhook. Violating any of 
 10. **No Enterprise security keys**: Only `enable-security` and `default-password-file` are allowed in `aerospikeConfig.security`. The keys `tls`, `ldap`, `log`, `syslog` are forbidden.
 11. **Strengthened map/list shapes (April 2026)**: `aerospikeConfig.service` and `aerospikeConfig.network` must be YAML maps; `aerospikeConfig.logging` must be a YAML list; each `namespaces[]` entry must be a map with a `name` key. `MetricLabels` values are TOML-escaped — control characters are rejected. Within one update, namespace `rack-id` may be added OR removed but not both (prevents data loss on rename).
 12. **Operations spec invariants**: `spec.operations[].kind` must be `WarmRestart` or `PodRestart`; `spec.operations[].id` length 1–20 chars; the operations list cannot be modified while one operation is `InProgress`. `spec.overrides` only valid when `spec.templateRef` is set.
+13. **CE image minimum**: `spec.image` must be CE major ≥ 8 (e.g. `ce-7`, dotless `7`, `ce-7.x` are rejected). Tag parsing handles ported registries (`host:5000/aerospike:...`) and `@sha256:` digests.
+14. **Unique namespace names**; **no Enterprise logging contexts** (`audit`, `report-data-op*`, `report-sys-admin`, `report-user-admin`, `report-violation`, `report-authentication`); `logging` entries must be maps with a non-empty `name`.
+15. **ACL privilege scope**: admin codes (`sys-admin`/`user-admin`/`data-admin`) are global-only (no `.namespace`/`.set` scope); scopes on other codes must be `<ns>` or `<ns>.<set>` with no empty/extra components.
+16. **Monitoring**: `serviceMonitor.interval` must be a Prometheus duration (e.g. `30s`); `serviceMonitor.labels`/`prometheusRule.labels` must be valid K8s labels.
+17. **Per-rack `aerospikeConfig`** overrides are validated against the same CE constraints as cluster-level config (no CE bypass via rack override).
 
 ---
 

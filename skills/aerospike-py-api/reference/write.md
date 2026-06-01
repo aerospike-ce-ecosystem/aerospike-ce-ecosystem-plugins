@@ -211,6 +211,8 @@ Execute multiple operations atomically on a single record.
 {"op": <OPERATOR_CONSTANT>, "bin": "<bin_name>", "val": <value>}
 ```
 
+> `OPERATOR_INCR` `val` must be `int`/`float` (missing/`None` defaults to `+1`); a non-numeric `val` raises `TypeError` at op-build time.
+
 ### Operator Constants
 
 | Constant | Description |
@@ -256,6 +258,8 @@ for bt in result.ordered_bins:
 
 All CDT operations return `Operation` dicts (`dict[str, Any]`) for use with
 `client.operate()`, `client.operate_ordered()`, or `client.batch_operate()`.
+
+> `return_type` is validated client-side: a list op must use `LIST_RETURN_*`, a map op must use `MAP_RETURN_*`. An out-of-range or wrong-family code (e.g. `MAP_RETURN_KEY`=6 on a list op) raises `ValueError` instead of silently returning nothing.
 
 ### List Operations
 
@@ -570,7 +574,7 @@ Import: `from aerospike_py import bit_operations as bit_ops`
 
 #### Notes
 - The `policy` parameter for bit operations is an `int` (`BIT_WRITE_*` constant), not a TypedDict.
-- `bit_add` / `bit_subtract`: `bit_size` must be <= 64. `signed` controls signed/unsigned. `action` controls overflow behavior.
+- `bit_add` / `bit_subtract`: `bit_size` must be <= 64. `action` must be `BIT_OVERFLOW_FAIL` (0), `BIT_OVERFLOW_SATURATE` (2), or `BIT_OVERFLOW_WRAP` (4) — any other int raises `ValueError` (no longer silently coerced to FAIL).
 - `value` for `bit_set`, `bit_or`, `bit_xor`, `bit_and` must be `bytes` or `bytearray`.
 - `value` for `bit_lscan`, `bit_rscan` is `bool` (`True` for 1, `False` for 0).
 
@@ -664,64 +668,8 @@ results = await async_client.batch_write_numpy(data, "test", "demo", dtype, retr
 ### Custom Key Field
 
 ```python
-dtype = np.dtype([("user_id", "i8"), ("score", "f8")])
-data = np.array([(100, 1.5), (101, 2.5)], dtype=dtype)
-
-# Use "user_id" as key instead of "_key"
-results = client.batch_write_numpy(
-    data, "test", "demo", dtype, key_field="user_id"
-)
+# key_field names the dtype field used as the user key (default "_key")
+results = client.batch_write_numpy(data, "test", "demo", dtype, key_field="user_id")
 ```
 
-> When using a custom `key_field`, the field name should **not** start with `_` if you want it also stored as a bin.
-
-### Pandas DataFrame to Aerospike
-
-```python
-import pandas as pd
-
-df = pd.DataFrame({"user_id": [1, 2, 3], "score": [0.95, 0.87, 0.72], "level": [10, 20, 15]})
-
-dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("level", "i4")])
-data = np.zeros(len(df), dtype=dtype)
-data["_key"] = df["user_id"].values
-data["score"] = df["score"].values
-data["level"] = df["level"].values
-
-results = client.batch_write_numpy(data, "test", "users", dtype)
-```
-
-### Write and Read Roundtrip
-
-```python
-# Write
-write_dtype = np.dtype([("_key", "i4"), ("x", "f8"), ("y", "f8"), ("category", "i4")])
-data = np.array([(1, 1.0, 2.0, 0), (2, 3.0, 4.0, 1), (3, 5.0, 6.0, 0)], dtype=write_dtype)
-client.batch_write_numpy(data, "test", "points", write_dtype)
-
-# Read back with .to_numpy(dtype) — GIL released during the structured-array fill
-read_dtype = np.dtype([("x", "f8"), ("y", "f8"), ("category", "i4")])
-keys = [("test", "points", i) for i in range(1, 4)]
-batch = client.batch_read(
-    keys,
-    policy={"key": aerospike.POLICY_KEY_SEND},
-).to_numpy(read_dtype)
-
-print(batch.batch_records["x"].mean())       # 3.0
-print(batch.batch_records["category"].sum())  # 1
-```
-
-### Best Practices
-
-- **Match dtype to data** -- use smallest sufficient dtype (`"f4"` vs `"f8"`, `"i2"` vs `"i8"`)
-- **Batch size** -- keep arrays at 100-5,000 rows per call
-- **Key field convention** -- use `"_key"` as the default key field
-- **Underscore prefix** -- fields starting with `_` are excluded from bins
-- **Large datasets** -- split into chunks:
-
-```python
-chunk_size = 1000
-for i in range(0, len(data), chunk_size):
-    chunk = data[i:i + chunk_size]
-    client.batch_write_numpy(chunk, "test", "demo", dtype)
-```
+A custom `key_field` not starting with `_` is **also** stored as a bin. Round-trip read: `client.batch_read(keys, policy={"key": aerospike.POLICY_KEY_SEND}).to_numpy(read_dtype)`. Keep batches at 100–5,000 rows; chunk larger datasets.

@@ -57,59 +57,24 @@ config: ClientConfig = {
 
 ### Authentication
 
-```python
-# Internal auth
-client = aerospike.client({
-    "hosts": [("127.0.0.1", 3000)],
-    "auth_mode": aerospike.AUTH_INTERNAL,
-}).connect("admin", "admin")
+Credentials go to `.connect(user, password)`, not the config dict; `auth_mode` selects the scheme:
 
-# External (LDAP) auth
-client = aerospike.client({
-    "hosts": [("127.0.0.1", 3000)],
-    "auth_mode": aerospike.AUTH_EXTERNAL,
-}).connect("ldap_user", "ldap_pass")
+```python
+client = aerospike.client({"hosts": [...], "auth_mode": aerospike.AUTH_EXTERNAL}).connect("ldap_user", "ldap_pass")
 ```
 
 ---
 
 ## Connection Patterns
 
-### Sync Client
+`.connect()` returns the client (chainable). Both clients are context managers (`with` / `async with` → auto-close). Note the sync builder pattern `aerospike.client(config).connect()` vs the async `AsyncClient(config)` then `await client.connect()`.
 
 ```python
-# Context manager (recommended)
-with aerospike.client(config).connect() as client:
-    record = client.get(key)
-# close() called automatically
-
-# Manual lifecycle
-client = aerospike.client(config).connect()
-try:
-    record = client.get(key)
-finally:
-    client.close()
-```
-
-### Async Client
-
-```python
-# Context manager (recommended)
-async with aerospike.AsyncClient(config) as client:
+with aerospike.client(config).connect() as client: ...           # sync
+async with aerospike.AsyncClient(config) as client:              # async
     await client.connect()
     record = await client.get(key)
-
-# Manual lifecycle
-client = aerospike.AsyncClient(config)
-await client.connect()
-try:
-    record = await client.get(key)
-finally:
-    await client.close()
 ```
-
-**Use async for:** High-concurrency web servers, fan-out reads, mixed I/O.
-**Sync is fine for:** Scripts, batch jobs, sequential pipelines.
 
 ---
 
@@ -144,7 +109,7 @@ config: ClientConfig = {
 
 - Use `batch_read()` instead of sequential `get()` calls -- single round-trip vs N round-trips.
 - Use `select()` or `batch_read(keys, bins=[...])` to read only needed bins, reducing network I/O.
-- For numeric workloads, use `batch_read()` with `_dtype` parameter for NumPy structured array output.
+- For numeric workloads, use `batch_read(keys).to_numpy(dtype)` for NumPy structured-array output (the `_dtype=` kwarg was removed).
 
 ### Expression Filters vs Secondary Indexes
 

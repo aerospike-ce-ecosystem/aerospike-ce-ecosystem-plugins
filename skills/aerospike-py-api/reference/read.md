@@ -101,10 +101,10 @@ import torch
 tensor = torch.from_numpy(np_batch.batch_records["score"])   # O(1) pointer share
 ```
 
-**Removed / renamed:**
+**Removed / renamed (BREAKING):**
 
 - `batch_read(..., _dtype=...)` kwarg is **gone** — use `batch_read(...).to_numpy(dtype)`.
-- `BatchReadHandle` class was renamed to `LazyBatchRecords`. `lazy_records.as_dict()` and `LazyBatchRecords.merge_as_dict(...)` remain as forwarding aliases for `to_dict()` / `merge_to_dict(...)`.
+- `BatchReadHandle` renamed to `LazyBatchRecords`. The transitional `as_dict()` / `merge_as_dict()` aliases were **removed** — use `to_dict()` / `merge_to_dict()`.
 
 Note: `batch_operate`, `batch_remove`, `batch_write`, and `batch_write_numpy` return `BatchWriteResult` (a NamedTuple wrapping `list[BatchRecord]`) — only `batch_read` returns the `LazyBatchRecords` handle.
 
@@ -160,22 +160,7 @@ query.foreach(callback)                           # iterate with callback
 
 ### Callback Iteration
 
-```python
-def process(record: Record) -> None:
-    print(f"{record.bins['name']}: age {record.bins['age']}")
-
-query.foreach(process)
-
-# Return False to stop early
-count = 0
-def limited(record: Record):
-    global count
-    count += 1
-    if count >= 5:
-        return False  # stop iteration
-
-query.foreach(limited)
-```
+`query.foreach(cb)` calls `cb(record)` per result. **Return `False` from the callback to stop iteration early** (library-specific).
 
 ### Predicates
 
@@ -183,29 +168,17 @@ Import: `from aerospike_py import predicates`
 
 | Function | Description |
 |----------|-------------|
-| `equals(bin, val)` | Equality match |
-| `between(bin, min, max)` | Range (inclusive) |
-| `contains(bin, idx_type, val)` | List/map contains |
+| `equals(bin, val)` | Equality match. `val` must be `int`/`str`/`bytes` (float/bool → `InvalidArgError`) |
+| `between(bin, min, max)` | Range (inclusive). Bounds must be integers (float/str → `InvalidArgError`) |
+| `contains(bin, idx_type, val)` | List/map contains. `idx_type` must be an `INDEX_TYPE_*` constant (else `InvalidArgError`) |
 | `geo_within_geojson_region(bin, geojson)` | Points in region |
 | `geo_within_radius(bin, lat, lng, radius)` | Points in circle (meters) |
 | `geo_contains_geojson_point(bin, geojson)` | Regions containing point |
 
-> **Note**: Geo predicates emit a `FutureWarning` and raise `ClientError` at execution time (not yet supported).
+> **Validation (raised at query-build, client-side):** the type/range guards above, plus empty bin names in any predicate, `query.select()`, or expression bin accessor → `InvalidArgError`.
+> **Geo predicates** emit a `FutureWarning` and raise `ClientError` at execution time (not yet supported).
 
-### Geospatial Query Examples
-
-```python
-# Points within a polygon
-region = '{"type":"Polygon","coordinates":[[[126.9,37.5],[126.9,37.6],[127.0,37.6],[127.0,37.5],[126.9,37.5]]]}'
-query.where(predicates.geo_within_geojson_region("location", region))
-
-# Points within radius (meters)
-query.where(predicates.geo_within_radius("location", 37.5665, 126.978, 5000.0))
-
-# Regions containing a point
-point = '{"type":"Point","coordinates":[126.978, 37.5665]}'
-query.where(predicates.geo_contains_geojson_point("coverage", point))
-```
+Geo predicate args: `geo_within_geojson_region(bin, geojson_str)`, `geo_within_radius(bin, lat, lng, radius_m)`, `geo_contains_geojson_point(bin, geojson_str)`. (Not yet supported — see note above.)
 
 ---
 
@@ -349,57 +322,36 @@ Combine with `|`: `REGEX_ICASE | REGEX_NEWLINE`. Avoid passing magic integers.
 
 | Function | Description |
 |----------|-------------|
-| `cond(*exprs)` | Conditional: `cond(bool1, val1, bool2, val2, ..., default)` |
+| `cond(*exprs)` | Conditional: `cond(bool1, val1, bool2, val2, ..., default)`. Requires odd operand count ≥ 3 (else `InvalidArgError`) |
 | `var(name)` | Variable reference |
 | `def_(name, value)` | Variable definition (used inside `let_`) |
-| `let_(*exprs)` | Variable binding scope: `let_(def_("x", ...), ..., body_expr)` |
+| `let_(*exprs)` | Variable binding scope: `let_(def_("x", ...), ..., body_expr)`. Requires ≥ 2 operands (else `InvalidArgError`) |
 
-### Advanced Patterns
+> Variadic ops (`and_`/`or_`/`xor_`, `num_add`/`sub`/`mul`/`div`, `min_`/`max_`, `int_and`/`or`/`xor`) require ≥ 1 operand — an empty call (e.g. `exp.and_()`) raises `InvalidArgError`.
 
-#### Basic Comparison and Logic
+### Patterns
 
 ```python
 from aerospike_py import exp
 
-# age > 18 AND status == "active"
-expr = exp.and_(
-    exp.gt(exp.int_bin("age"), exp.int_val(18)),
-    exp.eq(exp.string_bin("status"), exp.string_val("active")),
-)
-record = client.get(key, policy={"filter_expression": expr})
+# Comparison + logic — age > 18 AND status == "active"
+expr = exp.and_(exp.gt(exp.int_bin("age"), exp.int_val(18)),
+                exp.eq(exp.string_bin("status"), exp.string_val("active")))
+
+# Variable binding: let_(def_(name, value), ..., body)
+expr = exp.let_(exp.def_("total", exp.num_add(exp.int_bin("a"), exp.int_bin("b"))),
+                exp.gt(exp.var("total"), exp.int_val(100)))
+
+# Conditional: cond(cond1, val1, ..., default) — odd count ≥ 3
+expr = exp.cond(exp.gt(exp.int_bin("score"), exp.int_val(90)), exp.string_val("A"),
+                exp.string_val("B"))  # default
+
+# Metadata: expiring within 1h / ~10% sample
+exp.lt(exp.ttl(), exp.int_val(3600))
+exp.eq(exp.digest_modulo(10), exp.int_val(0))
 ```
 
-#### Variable Binding
-
-```python
-expr = exp.let_(
-    exp.def_("total", exp.num_add(exp.int_bin("a"), exp.int_bin("b"))),
-    exp.gt(exp.var("total"), exp.int_val(100)),
-)
-```
-
-#### Conditional Branching
-
-```python
-expr = exp.cond(
-    exp.gt(exp.int_bin("score"), exp.int_val(90)), exp.string_val("A"),
-    exp.gt(exp.int_bin("score"), exp.int_val(80)), exp.string_val("B"),
-    exp.string_val("C"),  # default
-)
-```
-
-#### Regex and Geo
-
-```python
-import aerospike_py
-expr = exp.regex_compare(
-    r"^user_\d+$", aerospike_py.REGEX_NONE, exp.string_bin("username"))
-
-expr = exp.geo_compare(
-    exp.geo_bin("location"),
-    exp.geo_val('{"type":"AeroCircle","coordinates":[[-122.0,37.5],5000.0]}'),
-)
-```
+Pass to any read/write/batch/query policy: `policy={"filter_expression": expr}` (works with `get`, `put`, `batch_read`, `query.results`, `operate`).
 
 #### PK Regex Filter Scan
 
@@ -425,191 +377,25 @@ for r in records:
     print(r.key.user_key, r.bins)
 ```
 
-Operational notes:
+Operational notes (library-specific gotchas):
 
-- This is a **full set scan + server-side filter**, not a primary-index lookup.
-  Aerospike's primary index keys on the digest, not the user key string —
-  there is no PK B-tree range scan.
-- Records written without `POLICY_KEY_SEND` have no stored user key and never
-  match a `key()` expression (the scan returns an empty list).
-- Avoid for hot-path prefix lookups on large sets. For production prefix
-  search, denormalize a fixed-width prefix bin (e.g. `name_prefix_3 = name[:3]`)
-  and index it with `INDEX_STRING`, then query via
-  [Query & Secondary Index](#query--secondary-index) using
-  `predicates.equals("name_prefix_3", "aaa")` — Aerospike string SI supports
-  equality only (no range/prefix), so the prefix must be materialized at
-  write time. Alternatively, use a lookup-set keyed by the prefix.
-
-#### Metadata Filters
-
-```python
-# Expiring within 1 hour
-exp.lt(exp.ttl(), exp.int_val(3600))
-
-# Sample ~10% of records
-exp.eq(exp.digest_modulo(10), exp.int_val(0))
-
-# Check if bit 3 is set in flags
-exp.ne(
-    exp.int_and(exp.int_bin("flags"), exp.int_val(0x08)),
-    exp.int_val(0),
-)
-```
-
-#### Policy Usage
-
-Expressions work with any read/write/batch/query policy:
-
-```python
-expr = exp.and_(
-    exp.ge(exp.int_bin("age"), exp.int_val(21)),
-    exp.eq(exp.bool_bin("verified"), exp.bool_val(True)),
-)
-
-record = client.get(key, policy={"filter_expression": expr})
-record = await async_client.get(key, policy={"filter_expression": expr})
-lazy_records = client.batch_read(keys, policy={"filter_expression": expr})
-records = query.results(policy={"filter_expression": expr})
-```
-
-#### Practical Examples
-
-```python
-# Active premium users
-expr = exp.and_(
-    exp.eq(exp.bool_bin("active"), exp.bool_val(True)),
-    exp.or_(
-        exp.eq(exp.string_bin("tier"), exp.string_val("gold")),
-        exp.eq(exp.string_bin("tier"), exp.string_val("platinum")),
-    ),
-    exp.ge(exp.int_bin("age"), exp.int_val(18)),
-)
-records = client.query("test", "users").results(policy={"filter_expression": expr})
-
-# Records expiring within 1 hour
-expr = exp.and_(
-    exp.gt(exp.ttl(), exp.int_val(0)),
-    exp.lt(exp.ttl(), exp.int_val(3600)),
-)
-
-# High-value transactions
-expr = exp.gt(
-    exp.num_mul(exp.float_bin("amount"), exp.int_bin("quantity")),
-    exp.float_val(10000.0),
-)
-```
+- **Full set scan + server-side filter**, NOT a primary-index lookup — Aerospike's primary index keys on the digest, not the user-key string (no PK B-tree range scan).
+- Records written without `POLICY_KEY_SEND` have no stored user key and never match a `key()` expression (scan returns empty).
+- For hot-path prefix lookups, denormalize a fixed-width prefix bin and `INDEX_STRING` it, then [`predicates.equals`](#predicates) — Aerospike string SI is equality-only (no range/prefix).
 
 ---
 
 ## NumPy Batch Read
 
-High-performance batch reads using NumPy structured arrays. Data flows directly between Aerospike and NumPy buffers via Rust, bypassing per-element Python object creation.
+Zero-copy structured-array reads via Rust. Requires `numpy >= 2.0` (`pip install aerospike-py[numpy]`). Numeric/fixed-bytes bins only — 5-10x faster than dict `batch_read` above ~10K records.
 
-Requires `numpy >= 2.0`. Install with: `pip install aerospike-py[numpy]`
-
-### When to Use
-
-| Scenario | Regular `batch_read` | NumPy `batch_read` |
-|----------|---------------------|-------------------|
-| Records < 100 | Preferred | Overhead not justified |
-| Records 100-10K | OK | **2-5x faster** |
-| Records > 10K | Slow (dict allocation) | **5-10x faster** |
-| Non-numeric bins | Required | Not supported |
-| Vectorized analytics | Manual conversion | **Native numpy arrays** |
-
-### Define a dtype
-
-Each field in the dtype maps to an Aerospike bin name:
+`batch_read(...).to_numpy(dtype)` → `NumpyBatchRecords`. Each dtype field maps to a bin name. **`dtype` must be a real `np.dtype` object** — list-of-tuples / dtype strings are NOT auto-promoted (wrap with `np.dtype(...)`). The per-record fill runs with the GIL released (`py.detach`) — pair with `torch.from_numpy(...)` for an O(1) hand-off.
 
 ```python
-import numpy as np
-
-dtype = np.dtype([
-    ("score", "f8"),     # float64
-    ("count", "i4"),     # int32
-    ("level", "u2"),     # uint16
-    ("tag", "S8"),       # 8-byte fixed string
-])
+dtype = np.dtype([("score", "f8"), ("count", "i4"), ("tag", "S8")])
+result = client.batch_read(keys, bins=["score", "count", "tag"]).to_numpy(dtype)
 ```
 
-### Supported dtype Kinds
+**Supported dtype kinds:** `i`/`u` → Integer, `f` → Float, `S` → String (truncated), `V` → Blob (truncated). Unicode `U`, object `O`, datetime `M`/`m` are **not supported**.
 
-| NumPy kind | Code | Examples | Aerospike type |
-|-----------|------|---------|---------------|
-| Signed int | `i` | `i1`, `i2`, `i4`, `i8` | Integer |
-| Unsigned int | `u` | `u1`, `u2`, `u4`, `u8` | Integer |
-| Float | `f` | `f2`, `f4`, `f8` | Float |
-| Fixed bytes | `S` | `S8`, `S16`, `S32` | String (truncated) |
-| Void bytes | `V` | `V8`, `V16` | Blob (truncated) |
-
-> Variable-length strings (`U`), objects (`O`), and datetime (`M`/`m`) are **not supported**.
-
-### Read into NumPy Arrays
-
-`batch_read()` returns a `LazyBatchRecords` handle; call `.to_numpy(dtype)` on it to get a `NumpyBatchRecords`. `dtype` **must be a real `np.dtype` object** — list-of-tuples / dtype strings are not auto-promoted, wrap them with `np.dtype(...)` first.
-
-```python
-keys = [("test", "demo", f"user_{i}") for i in range(1000)]
-
-# Sync
-lazy_records = client.batch_read(keys, bins=["score", "count", "level", "tag"])
-result = lazy_records.to_numpy(dtype)               # NumpyBatchRecords
-
-# Async
-lazy_records = await async_client.batch_read(keys, bins=["score", "count"])
-result = lazy_records.to_numpy(dtype)
-```
-
-The per-record `Value → buffer` fill loop runs with the GIL released (`py.detach`), so sibling Python work (torch inference, other asyncio tasks) can hold the GIL while the buffer fills — pair the result with `torch.from_numpy(...)` for an O(1) tensor hand-off.
-
-### NumpyBatchRecords API
-
-| Attribute / Method | Description |
-|-------------------|-------------|
-| `batch_records` | Structured numpy array with bin data |
-| `meta` | `(gen, ttl)` structured array |
-| `result_codes` | `int32` array (0 = success) |
-| `get(key)` | Retrieve single record by primary key |
-| `len(result)` | Number of records |
-| `key in result` | Check if primary key exists |
-| `for r in result` | Iterate over records |
-
-### Access Data
-
-```python
-# Vectorized operations on the full array
-avg_score = result.batch_records["score"].mean()
-high_scorers = result.batch_records[result.batch_records["score"] > 90]
-
-# Individual record by primary key
-record = result.get("user_42")
-print(record["score"], record["count"])
-
-# Metadata arrays
-print(result.meta["gen"])  # generation numbers
-print(result.meta["ttl"])  # TTL values
-
-# Result codes (0 = success)
-success_mask = result.result_codes == 0
-valid_records = result.batch_records[success_mask]
-```
-
-### Pandas Integration
-
-```python
-import pandas as pd
-
-result = client.batch_read(keys, bins=["score", "count"]).to_numpy(dtype)
-
-# Direct conversion -- zero copy for numeric data
-df = pd.DataFrame(result.batch_records)
-df["success"] = result.result_codes == 0
-```
-
-### Performance Tips
-
-1. **Pre-allocate dtypes** -- Define dtype once and reuse across calls
-2. **Match dtype to data** -- Use smallest sufficient type (`i4` vs `i8`, `f4` vs `f8`)
-3. **Batch size** -- Optimal range: 500-5000 records per call
-4. **Use fixed-length strings** -- `S16` is much faster than variable-length alternatives
-5. **Filter server-side** -- Combine with expression filters to reduce data transfer
+**`NumpyBatchRecords`** attributes: `.batch_records` (structured array), `.meta` (`(gen, ttl)` array), `.result_codes` (`int32`, 0=success). Supports `.get(key)`, `len()`, `key in`, iteration. **Gotcha:** missing/failed reads leave their row at the dtype zero value — mask with `result.result_codes == 0` before any aggregation. `pd.DataFrame(result.batch_records)` is zero-copy for numeric data.

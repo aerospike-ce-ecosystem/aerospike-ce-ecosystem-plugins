@@ -6,63 +6,69 @@ This is background reference for `status.phase` and `status.conditions[]` on the
 
 ## status.phase
 
-| Phase | Meaning | Triggers |
-|-------|---------|----------|
-| `""` (empty) | CR just created, reconciler has not yet observed it | Initial admission |
-| `Pending` | Reconciler observed CR, work is in flight | First reconcile loop |
-| `Completed` | Spec is fully realized; cluster is healthy and stable | All pods Ready, generations matched, no in-flight ops |
-| `Error` | A reconcile attempt failed and is being retried | Transient errors (pod not ready, network), exponential backoff |
-| `Paused` | Reconciliation suspended via `spec.paused: true` | User toggled `paused: true` |
-| `ConfigDegraded` | Dynamic config rollback failed; cluster is in inconsistent config state across pods | 2PC apply failed AND LIFO rollback also failed |
+Exact `AerospikePhase` enum (operator `aerospikecluster_types.go`). There is no `Pending` phase — the generic in-flight phase is `InProgress`.
 
-### `Phase = Completed`
+| Phase | Meaning |
+|-------|---------|
+| `""` (empty) | CR just created, reconciler has not yet observed it |
+| `InProgress` | Generic in-flight reconcile (creation, resume, config apply) |
+| `Completed` | Spec fully realized; all pods Ready, generations matched, ACL synced, no in-flight ops |
+| `Error` | Unrecoverable reconcile error (distinct from the circuit-breaker `BackoffActive`) |
+| `ScalingUp` / `ScalingDown` | Pods being added / removed |
+| `WaitingForMigration` | Scale-down deferred until data migration drains |
+| `RollingRestart` | Rolling restart in progress (image/static-config change) |
+| `ACLSync` | ACL roles/users syncing — **if stuck here, ACL sync is failing** (see below) |
+| `Paused` | Reconciliation suspended via `spec.paused: true` |
+| `Deleting` | Cluster deletion in progress |
+| `ConfigDegraded` | 2PC dynamic config apply AND LIFO rollback both failed; pods hold inconsistent runtime config |
+| `BackoffActive` | Reconcile circuit breaker tripped; requeue with exponential backoff |
 
-The expected steady state. All pods Ready, observed generation matches spec generation, no operations in progress.
+### `Phase = ACLSync` (stuck) — ACL failure does NOT reach Completed
 
-### `Phase = Error`
+On an ACL sync failure the reconcile publishes `phase=ACLSync` (reason `"ACL synchronization failed; will retry: ..."`) and requeues every ~30s — it does **not** report `Completed`. A Secret change doesn't bump the CR generation, so the explicit requeue is the only prompt retry. Check the `ACLSynced` condition / `ACLSyncError` event / the password Secret.
 
-Reconciler will retry with exponential backoff. **Note:** for permanent errors (validation, missing secrets), the circuit breaker activates immediately and `status.conditions` will include `ReconcileHealthy=False` with `reason=PermanentError` -- in that case the backoff is bypassed and no further retries happen until you fix the spec or toggle `paused`.
+### `Phase = BackoffActive` — circuit breaker
 
-### `Phase = Paused`
+The reconcile-failure circuit breaker tripped (`failedReconcileCount` at max). Emits the `CircuitBreakerActive` event and sets `acko_circuit_breaker_active=1`. **Two flavors**, distinguished by the `ReconcileHealthy` condition:
+- `ReconcileHealthy=True` — transient cause (pod not ready, image pull, capacity); auto-retries with backoff.
+- `ReconcileHealthy=False, reason=PermanentError` — validation/configgen/missing-Secret error; no retry until you fix the spec or toggle `paused: true → null` (which clears stale `failedReconcileCount`/`lastReconcileError`).
 
-Set when `spec.paused: true`. The reconciler stops touching the cluster. Resume by setting `spec.paused: null` (or `false`); on resume, stale `status.failedReconcileCount` and `status.lastReconcileError` are cleared.
+### `Phase = ConfigDegraded` — 2PC rollback failed
 
-### `Phase = ConfigDegraded` (NEW, April 2026)
-
-Dynamic config update used a 2-phase commit (validate-all-then-apply-all). Apply failed mid-flight, and the LIFO rollback also failed -- so different pods now have different runtime configs. The operator will attempt a cold restart on the next reconcile to get back to the spec'd config.
-
-Recovery is automatic on the next reconcile, but you should:
-1. Inspect `status.conditions` for `DynamicConfigDegraded=True` and read its `message`.
-2. Inspect `status.pods[].dynamicConfigChanges` to see which path/oldValue/newValue per pod.
-3. If the cold restart loop continues, fix the underlying spec problem (e.g., a config value that's invalid on some hardware shape).
+A 2-phase-commit dynamic config update had its apply fail mid-flight AND the LIFO rollback also fail, so pods hold different runtime configs. The operator cold-restarts on the next reconcile to converge to spec. To diagnose: read the `DynamicConfigDegraded=True` condition message and `status.pods[].dynamicConfigChanges` (per-path old/new/result). If the cold-restart loop persists, the value is invalid for the deployed hardware shape — revert the spec.
 
 ---
 
 ## status.conditions[]
 
-ACKO emits standard K8s-style conditions. Each has `type`, `status` (`True`/`False`/`Unknown`), `reason`, `message`, `lastTransitionTime`.
+Each condition has `type`, `status` (`True`/`False`/`Unknown`), `reason`, `message`, `lastTransitionTime`. Full set (operator `aerospikecluster_types.go`):
 
-| Type | Status meaning | Reason examples |
-|------|----------------|-----------------|
-| `ReconcileHealthy` | `True` = recent reconciles succeeded; `False` = circuit broken | `PermanentError`, `Recovered` |
-| `DynamicConfigDegraded` | `True` = pods have inconsistent dynamic config | `RollbackFailed`, `ApplyFailed` |
-| `ReconciliationPaused` | `True` = `spec.paused: true` is in effect | `UserRequested` |
+| Type | `True` means |
+|------|--------------|
+| `Available` | at least one pod is Ready |
+| `Ready` | all desired pods are running and Ready |
+| `ConfigApplied` | every pod carries an accepted config hash (per-rack aware — see below) |
+| `ACLSynced` | ACL roles/users synced (only set when ACL is configured; cleared when ACL removed) |
+| `MigrationComplete` | no data migrations pending |
+| `ReconciliationPaused` | `spec.paused: true` in effect |
+| `ReconcileHealthy` | `False` = circuit broken (reasons `PermanentError`, `Recovered`) |
+| `DynamicConfigDegraded` | pods hold inconsistent dynamic config (reasons `RollbackFailed`, `ApplyFailed`) |
+
+### `ConfigApplied`
+
+Each pod carries the **effective per-rack** config hash — (cluster config DeepMerged with `rack.AerospikeConfig`). The condition accepts a pod whose hash is in the valid per-rack hash set, so a rack that overrides config no longer pins `ConfigApplied=False` forever after convergence.
 
 ### `ReconcileHealthy = False / reason = PermanentError`
 
-Circuit breaker is active. The operator detected an unrecoverable error (e.g., configgen rejected a value, a required Secret is missing, a webhook validation failure that somehow escaped admission) and stopped retrying. `status.failedReconcileCount` is pinned at the max value -- there is no incremental backoff to wait through.
-
-To recover:
-- Fix the root cause (correct the spec, create the missing Secret, etc.).
-- Either edit the spec to retrigger a reconcile, OR toggle `spec.paused: true` then `spec.paused: null` to clear the stale `failedReconcileCount` and `lastReconcileError`.
+Circuit breaker active with an unrecoverable error (configgen rejected a value, missing Secret, escaped webhook failure). Phase is `BackoffActive`; `failedReconcileCount` pinned at max, no backoff to wait through. Recover by fixing the root cause then editing the spec, OR toggling `spec.paused: true → null` to clear stale state.
 
 ### `DynamicConfigDegraded = True`
 
-Set together with `phase=ConfigDegraded`. See above. Read `status.pods[].dynamicConfigChanges` for per-pod detail.
+Set together with `phase=ConfigDegraded`; read `status.pods[].dynamicConfigChanges` for per-pod detail.
 
 ### `ReconciliationPaused = True`
 
-Set together with `phase=Paused`. The condition's `lastTransitionTime` is the canonical "when did pause start" — the `acko_cluster_paused_timestamp_seconds` and `acko_cluster_paused_duration_seconds` metrics are derived from it.
+Set together with `phase=Paused`. Its `lastTransitionTime` is the canonical pause-start — `acko_cluster_paused_timestamp_seconds` / `acko_cluster_paused_duration_seconds` derive from it.
 
 ---
 
@@ -91,17 +97,21 @@ kubectl get asc <name> -o jsonpath='{.status.pods[*].dynamicConfigChanges}' | jq
 status.phase == Completed
   -> healthy steady state
 
-status.phase == Pending or Error (transient)
+status.phase == InProgress / ScalingUp / ScalingDown / RollingRestart (transient)
   -> wait one reconcile cycle; check events for hints
+
+status.phase == ACLSync (stuck)
+  -> ACL sync failing -> check ACLSynced condition / ACLSyncError event / Secret
 
 status.phase == ConfigDegraded
   -> 2PC dynamic config rollback failed
   -> read DynamicConfigDegraded condition + status.pods[].dynamicConfigChanges
   -> operator will cold-restart on next reconcile
 
-status.conditions[ReconcileHealthy].status == False, reason == PermanentError
-  -> circuit broken on a permanent error
-  -> fix root cause; toggle paused or edit spec to retrigger
+status.phase == BackoffActive
+  -> circuit breaker tripped
+  -> if ReconcileHealthy==False/PermanentError: fix root cause; toggle paused or edit spec
+  -> else transient: auto-retries with backoff
 
 status.conditions[ReconciliationPaused].status == True
   -> spec.paused == true; nothing happens until you resume

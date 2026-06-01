@@ -84,31 +84,18 @@ Detail: `./reference/admin.md`
 ```python
 keys = [("test", "demo", f"user_{i}") for i in range(10)]
 
-# batch_read -> LazyBatchRecords (a deferred-conversion handle, NOT a dict).
-# Materialise explicitly via .to_dict() or .to_numpy(dtype):
-lazy_records = client.batch_read(keys)              # or batch_read(keys, bins=["name"])
-for user_key, bins in lazy_records.to_dict().items():
-    print(user_key, bins["name"])
+# batch_read -> LazyBatchRecords (deferred-conversion handle, NOT a dict). Materialise
+# via .to_dict() / .to_numpy(dtype), or use it dict-like (Mapping over cached to_dict()):
+lazy = client.batch_read(keys)                      # or batch_read(keys, bins=["name"])
+for user_key, bins in lazy.items(): ...             # dict-like; missing keys absent
+if "user_3" in lazy: print(lazy["user_3"]["name"])
 
-# Backward compat: the handle implements the Mapping protocol over a cached
-# to_dict() view, so existing dict-style code keeps working without changes:
-if "user_3" in lazy_records:
-    print(lazy_records["user_3"]["name"])
-for user_key, bins in lazy_records.items():         # same as .to_dict().items()
-    ...
-
-# Missing keys are absent from the dict view. 2.6x faster than C client under asyncio.gather.
-
-# batch_operate / batch_remove return BatchWriteResult (NamedTuple wrapper with .batch_records)
+# batch_operate / batch_remove -> BatchWriteResult (NamedTuple, .batch_records)
 results = client.batch_operate(keys, [{"op": aerospike_py.OPERATOR_INCR, "bin": "views", "val": 1}])
-for br in results.batch_records:
-    if br.result == 0 and br.record is not None: print(br.record.bins)
-
-results = client.batch_remove(keys)
 failed = [br for br in results.batch_records if br.result != 0]
 ```
 
-NumPy: `batch_read(...).to_numpy(np.dtype([...]))` returns `NumpyBatchRecords` for a zero-copy structured array (the per-record fill runs with the GIL released via `py.detach`, ideal for FastAPI/PyTorch CPU-inference workers — pair with `torch.from_numpy(...)`). `dtype` must be a real `np.dtype` object; list-of-tuples / dtype strings are not auto-promoted. The legacy `batch_read(..., _dtype=...)` kwarg has been **removed**. For writes use `batch_write_numpy(data, ns, set, dtype, retry=3)` (auto-retry). Detail: `./reference/read.md` | `./reference/write.md`
+NumPy: `batch_read(...).to_numpy(dtype)` → `NumpyBatchRecords` (zero-copy; GIL released during fill — pair with `torch.from_numpy(...)`). `dtype` must be a real `np.dtype` (no auto-promote). The `batch_read(..., _dtype=...)` kwarg is **removed**. The `as_dict()`/`merge_as_dict()` aliases are **removed** (use `to_dict()`/`merge_to_dict()`). Writes: `batch_write_numpy(data, ns, set, dtype, retry=3)`. Detail: `./reference/read.md` | `./reference/write.md`
 
 ## 5b. Batch Write
 
@@ -137,7 +124,7 @@ Atomic multi-op on a single record. CDT ops (Section 7) can be mixed in.
 
 ```python
 ops = [
-    {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},
+    {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},   # INCR val must be int/float -> else TypeError
     {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
 ]
 record = client.operate(key, ops)  # READ=1, WRITE=2, INCR=5, APPEND=9, PREPEND=10, TOUCH=11, DELETE=12
@@ -146,21 +133,16 @@ result = client.operate_ordered(key, ops)  # preserves operation order in result
 
 ## 7. CDT Operations
 
+Helper modules build `Operation` dicts for `operate()`/`batch_operate()`. `return_type` is family-validated client-side (list ops → `LIST_RETURN_*`, map ops → `MAP_RETURN_*`; wrong-family → `ValueError`).
+
 ```python
 from aerospike_py import list_operations as lop, map_operations as mop
 from aerospike_py import bit_operations as bop, hll_operations as hop
 
-record = client.operate(key, [
-    lop.list_append("mylist", "val"), lop.list_get("mylist", 0), lop.list_size("mylist"),
-])
-record = client.operate(key, [
-    mop.map_put("mymap", "k1", "v1"),
-    mop.map_get_by_key("mymap", "k1", aerospike_py.MAP_RETURN_VALUE),
-])
-# Bit operations (bitwise manipulation on bytes bins)
-record = client.operate(key, [bop.bit_set("flags", 0, 8, b"\xff"), bop.bit_count("flags", 0, 64)])
-# HyperLogLog (cardinality estimation)
-record = client.operate(key, [hop.hll_add("visitors", ["u1", "u2"], 10), hop.hll_get_count("visitors")])
+client.operate(key, [lop.list_append("mylist", "v"), lop.list_get("mylist", 0)])
+client.operate(key, [mop.map_get_by_key("mymap", "k1", aerospike_py.MAP_RETURN_VALUE)])
+client.operate(key, [bop.bit_count("flags", 0, 64)])          # bit_add action: FAIL/SATURATE/WRAP only
+client.operate(key, [hop.hll_add("visitors", ["u1"], 10), hop.hll_get_count("visitors")])
 ```
 
 Detail: `./reference/write.md` | `./reference/constants.md`
@@ -177,7 +159,7 @@ query.select("name", "age"); query.where(p.between("age", 20, 40))
 records = query.results()     # or query.foreach(callback)
 ```
 
-Predicates: `p.equals(bin, val)`, `p.between(bin, min, max)`, `p.contains(bin, idx_type, val)`
+Predicates (validated client-side at query-build → `InvalidArgError`): `p.equals(bin, val)` (val int/str/bytes), `p.between(bin, min, max)` (integer bounds), `p.contains(bin, INDEX_TYPE_*, val)`. Empty bin names rejected.
 
 > Scan API removed -- use `Query` (no `where` clause) for full-set scan. `get_many`/`exists_many`/`select_many` removed -- use `batch_read`/`batch_operate`.
 

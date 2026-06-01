@@ -200,142 +200,26 @@ nodes = async_client.get_node_names()    # async client — NOT awaitable, alway
 
 ## Error Handling
 
-### Common Error Handling Pattern
+All exceptions import from `aerospike_py` directly (not `aerospike_py.exception.X`) and are identical for sync/async clients. Catch specifics before `AerospikeError` (catch-all). Key library-specific behaviors:
 
-Always catch specific exceptions before broader ones:
-
-```python
-from aerospike_py import (
-    RecordNotFound,
-    AerospikeTimeoutError,
-    ClusterError,
-    AerospikeError,
-)
-
-try:
-    record = client.get(key)
-except RecordNotFound:
-    # Handle missing record
-    bins = {}
-except AerospikeTimeoutError:
-    # Retry or circuit-break
-    raise
-except ClusterError:
-    # Connection lost -- reconnect or fail fast
-    raise
-except AerospikeError as e:
-    # Catch-all for any other Aerospike errors
-    logger.error("Aerospike error: %s", e)
-    raise
-```
-
-### Write Conflict Patterns
-
-**CREATE_ONLY (insert-only):**
+- **`client.connect()` raises `ClusterError`** if no seed is reachable; the client auto-reconnects to surviving nodes after connect.
+- **Single-record reads raise** `RecordNotFound` (missing), `RecordGenerationError` (CAS conflict, `POLICY_GEN_EQ`), `RecordExistsError` (`CREATE_ONLY`), `AerospikeTimeoutError`.
+- **Batch ops do NOT raise** for per-record failures — check `br.result` (0 = OK) per record. `batch_read` missing keys are simply absent from the dict view; `batch_operate`/`batch_remove`/`batch_write` return `BatchWriteResult` — iterate `.batch_records`.
 
 ```python
-try:
-    client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONLY})
-except RecordExistsError:
-    pass  # record already exists
-```
-
-**Optimistic locking (generation check):**
-
-```python
-record = client.get(key)
-try:
-    client.put(key, bins, meta={"gen": record.meta.gen}, policy={"gen": aerospike.POLICY_GEN_EQ})
-except RecordGenerationError:
-    pass  # concurrent modification, retry with fresh read
-```
-
-**UPDATE_ONLY:**
-
-```python
-try:
-    client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_UPDATE_ONLY})
-except RecordNotFound:
-    pass  # record does not exist
-```
-
-### Batch Error Handling
-
-Batch operations do not raise exceptions for individual record failures. Check per-record result codes:
-
-```python
-import aerospike_py as aerospike
-
 keys = [("test", "demo", f"id-{i}") for i in range(100)]
-lazy_records = client.batch_read(keys)
-# batch_read returns a LazyBatchRecords handle that is dict-like
-# (call .to_dict() if you need the materialised dict[UserKey, AerospikeRecord]).
-# Missing keys are absent from the dict view.
-present_user_keys = set(lazy_records.keys())
-expected_user_keys = {f"id-{i}" for i in range(100)}
-missing = expected_user_keys - present_user_keys
-for user_key, bins in lazy_records.items():
-    print(user_key, bins)
-for user_key in missing:
-    print("missing:", user_key)
+lazy = client.batch_read(keys)
+missing = {f"id-{i}" for i in range(100)} - set(lazy.keys())   # absent = not found
 
-# batch_operate / batch_remove return BatchWriteResult (NamedTuple) -- check per-record result
 results = client.batch_operate(keys, [{"op": aerospike.OPERATOR_INCR, "bin": "views", "val": 1}])
 for br in results.batch_records:
     if br.result == aerospike.AEROSPIKE_OK and br.record is not None:
-        print(br.record.bins)
+        ...                                       # success
     elif br.result == aerospike.AEROSPIKE_ERR_RECORD_NOT_FOUND:
-        print("missing:", br.key)
-    else:
-        print("error:", br.key, br.result)
+        ...                                       # missing: br.key
 ```
 
-For `batch_write`, also inspect `br.in_doubt` to decide whether a failure is safe to retry.
-
-### Async Error Handling
-
-Exception types are identical for sync and async clients:
-
-```python
-async def get_user(client, user_id: str) -> dict | None:
-    try:
-        record = await client.get(("app", "users", user_id))
-        return record.bins
-    except RecordNotFound:
-        return None
-    except AerospikeTimeoutError:
-        raise
-```
-
-### Connection Error Handling
-
-```python
-from aerospike_py import ClusterError
-
-try:
-    client = aerospike.client(config).connect()
-except ClusterError as e:
-    logger.critical("Cannot reach Aerospike cluster: %s", e)
-    raise SystemExit(1)
-```
-
-The client automatically reconnects to surviving nodes. For transient failures, use retry-with-backoff:
-
-```python
-import time
-from aerospike_py import AerospikeTimeoutError, ClusterError
-
-TRANSIENT_ERRORS = (AerospikeTimeoutError, ClusterError)
-
-def resilient_get(client, key, max_retries: int = 3):
-    for attempt in range(max_retries):
-        try:
-            return client.get(key)
-        except TRANSIENT_ERRORS:
-            if attempt == max_retries - 1:
-                raise
-            time.sleep(0.1 * (2 ** attempt))
-```
+For `batch_write`, also inspect `br.in_doubt` before retrying (write may have applied — see write.md).
 
 ### Result Code Reference
 
