@@ -42,7 +42,7 @@ All constants are importable from `aerospike_py`.
 | Constant | Value | Description |
 |----------|-------|-------------|
 | POLICY_EXISTS_IGNORE | 0 | Overwrite if exists, create if not (default) |
-| POLICY_EXISTS_UPDATE | 1 | Update if exists, create if not |
+| POLICY_EXISTS_UPDATE | 1 | Alias of POLICY_EXISTS_UPDATE_ONLY — errors (RecordNotFound) if record absent |
 | POLICY_EXISTS_UPDATE_ONLY | 1 | Error if record does not exist |
 | POLICY_EXISTS_REPLACE | 2 | Replace entire record (deletes other bins) |
 | POLICY_EXISTS_REPLACE_ONLY | 3 | Replace entire record, error if not exists |
@@ -94,7 +94,7 @@ All constants are importable from `aerospike_py`.
 | TTL_NAMESPACE_DEFAULT | 0 | Use namespace default TTL |
 | TTL_NEVER_EXPIRE | -1 | Record never expires |
 | TTL_DONT_UPDATE | -2 | Do not change existing TTL |
-| TTL_CLIENT_DEFAULT | -3 | Use client policy default |
+| TTL_CLIENT_DEFAULT | -3 | Resolves to namespace default — aerospike-py has no client-level default TTL |
 
 ---
 

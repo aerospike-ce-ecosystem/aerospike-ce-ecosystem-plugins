@@ -61,7 +61,7 @@ async def read(pk: str, client: AsyncClient = Depends(get_client)):
 
 ## 2b. Batch Endpoints
 
-`batch_read` returns a `LazyBatchRecords` handle (NOT a dict). Materialise via `.to_dict()` for the JSON response, or use the dict-like Mapping dunders directly (`handle.items()`, `handle["k"]`, `"k" in handle`). For inference handlers feeding torch, use `.to_numpy(np.dtype([...]))` — the per-record fill runs with the GIL released, so other request handlers keep making progress while the structured array is built. Missing keys are absent from the dict view.
+`batch_read` returns a `LazyBatchRecords` handle (NOT a dict). Materialise via `.to_dict()` for the JSON response (or `.to_list()` for a request-order `list[bins | None]`, collision-safe across sets), or use the dict-like Mapping dunders directly (`handle.items()`, `handle["k"]`, `"k" in handle`). For inference handlers feeding torch, use `.to_numpy(np.dtype([...]))` — the per-record fill runs with the GIL released, so other request handlers keep making progress while the structured array is built. Missing keys are absent from the dict view.
 
 ```python
 from pydantic import BaseModel
