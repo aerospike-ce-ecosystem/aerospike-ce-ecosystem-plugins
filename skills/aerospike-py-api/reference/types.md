@@ -83,6 +83,7 @@ Returned by sync **and** async `batch_read()`. A zero-conversion handle that wra
 | Method / Operator | Returns | Description |
 |-------------------|---------|-------------|
 | `lazy_records.to_dict()` | `dict[UserKey, AerospikeRecord]` (`= BatchRecords`) | Materialise as `dict[user_key, bins_dict]`. Excludes digest-only and failed records. |
+| `lazy_records.to_list()` | `list[dict \| None]` | Materialise as `list[bins_dict \| None]` in request-key order; `None` at miss/failure positions (header-only hit = `{}`). Collision-safe across sets, where `to_dict()` keeps only one record per `user_key`. Not cached. |
 | `lazy_records.to_numpy(dtype)` | `NumpyBatchRecords` | Materialise as a structured array. `dtype` **must be a real `np.dtype` object** (e.g. `np.dtype([("score","i4")])`). The per-record fill loop runs with the GIL released (`py.detach`), so sibling work (torch inference, other asyncio tasks) can hold the GIL while the buffer fills. |
 | `lazy_records.batch_records` | `list[BatchRecord]` | Compat path: lazy NamedTuple conversion. Includes digest-only and failed records. |
 | `lazy_records.items()` / `keys()` / `values()` / `get()` | dict views | Dict-style — same semantics as the cached `to_dict()`. |
@@ -173,7 +174,7 @@ Returned by `info_all`. One result per cluster node.
 | `operate()` | `Record` |
 | `operate_ordered()` | `OperateOrderedResult` |
 | `info_all()` | `list[InfoNodeResult]` |
-| `batch_read()` | `LazyBatchRecords` — call `.to_dict()` for `BatchRecords` shape, `.to_numpy(np.dtype([...]))` for `NumpyBatchRecords` |
+| `batch_read()` | `LazyBatchRecords` — call `.to_dict()` for `BatchRecords` shape, `.to_list()` for request-order `list[bins \| None]`, `.to_numpy(np.dtype([...]))` for `NumpyBatchRecords` |
 | `batch_write()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()` | `BatchWriteResult` (NamedTuple, `.batch_records: list[BatchRecord]`) |
 | `ping()` | `bool` |
 | `Query.results()` | `list[Record]` |
@@ -207,6 +208,7 @@ Used by: `put()`, `remove()`, `touch()`, `append()`, `prepend()`, `increment()`,
 | socket_timeout | int | 30000 | Socket timeout (ms) |
 | total_timeout | int | 1000 | Total transaction timeout (ms) |
 | max_retries | int | 0 | Max retry attempts |
+| sleep_between_retries | int | 0 | Sleep between retries (ms) |
 | durable_delete | bool | false | Durable delete (Enterprise) |
 | key | int | POLICY_KEY_DIGEST | Key send policy (`POLICY_KEY_*`) |
 | exists | int | POLICY_EXISTS_IGNORE | Record exists policy (`POLICY_EXISTS_*`) |
@@ -233,6 +235,7 @@ Used by: `batch_read()`, `batch_operate()`, `batch_remove()`
 | socket_timeout | int | 30000 | Socket timeout (ms) |
 | total_timeout | int | 1000 | Total transaction timeout (ms) |
 | max_retries | int | 2 | Max retry attempts |
+| sleep_between_retries | int | 0 | Sleep between retries (ms) |
 | filter_expression | Any | | Expression filter |
 
 ### QueryPolicy
@@ -244,6 +247,7 @@ Used by: `Query.results()`, `Query.foreach()`
 | socket_timeout | int | 30000 | Socket timeout (ms) |
 | total_timeout | int | 0 | Total timeout (0 = no limit) |
 | max_retries | int | 2 | Max retry attempts |
+| sleep_between_retries | int | 0 | Sleep between retries (ms) |
 | max_records | int | 0 | Max records to return (0 = all) |
 | records_per_second | int | 0 | Rate limit (0 = unlimited) |
 | filter_expression | Any | | Expression filter |
@@ -262,7 +266,7 @@ Used by: `admin_create_role()`, `admin_grant_privileges()`, `admin_revoke_privil
 
 | Field | Type | Description |
 |-------|------|-------------|
-| code | int | Privilege code (`PRIV_*`) |
+| code | int \| str | `PRIV_*` constant or canonical name (`"read"`, `"read-write"`, ...). Reads back as the name in `RoleInfo.privileges`. |
 | ns | str | Namespace scope (empty = global) |
 | set | str | Set scope (empty = namespace-wide) |
 

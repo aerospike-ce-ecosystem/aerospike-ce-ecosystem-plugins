@@ -88,6 +88,8 @@ client.increment(key, "age", 1)
 client.increment(key, "score", 0.5)  # float increment
 ```
 
+> `offset` must be `int`/`float` — other types raise `TypeError` client-side (same guard as `OPERATOR_INCR`).
+
 ### remove_bin(key, bin_names, meta=None, policy=None)
 
 Remove specific bins from a record.
@@ -184,6 +186,7 @@ except RecordGenerationError:
 | `socket_timeout` | int | Socket idle timeout (ms) |
 | `total_timeout` | int | Total transaction timeout (ms) |
 | `max_retries` | int | Maximum retry attempts |
+| `sleep_between_retries` | int | Sleep between retries (ms) |
 | `durable_delete` | bool | Durable delete (requires Enterprise) |
 | `key` | int | Key send policy |
 | `exists` | int | Record existence policy |
@@ -575,6 +578,7 @@ Import: `from aerospike_py import bit_operations as bit_ops`
 #### Notes
 - The `policy` parameter for bit operations is an `int` (`BIT_WRITE_*` constant), not a TypedDict.
 - `bit_add` / `bit_subtract`: `bit_size` must be <= 64. `action` must be `BIT_OVERFLOW_FAIL` (0), `BIT_OVERFLOW_SATURATE` (2), or `BIT_OVERFLOW_WRAP` (4) — any other int raises `ValueError` (no longer silently coerced to FAIL).
+- `bit_resize`: `resize_flags` must be exactly one of `BIT_RESIZE_DEFAULT` (0), `BIT_RESIZE_FROM_FRONT` (1), `BIT_RESIZE_GROW_ONLY` (2), `BIT_RESIZE_SHRINK_ONLY` (4) — composed values (e.g. `GROW_ONLY | FROM_FRONT`) raise `ValueError`, not combinable.
 - `value` for `bit_set`, `bit_or`, `bit_xor`, `bit_and` must be `bytes` or `bytearray`.
 - `value` for `bit_lscan`, `bit_rscan` is `bool` (`True` for 1, `False` for 0).
 

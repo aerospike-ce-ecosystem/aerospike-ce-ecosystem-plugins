@@ -100,6 +100,7 @@ client.admin_drop_role("data_reader")
 {"code": aerospike.PRIV_READ}                              # Global
 {"code": aerospike.PRIV_READ, "ns": "test"}                # Namespace-scoped
 {"code": aerospike.PRIV_READ, "ns": "test", "set": "demo"} # Namespace + set-scoped
+{"code": "read", "ns": "test", "set": "demo"}              # Canonical name also accepted (handy for JSON/HTTP)
 ```
 
 ### RoleInfo dict
@@ -122,18 +123,18 @@ client.admin_drop_role("data_reader")
 
 ## Privilege Constants
 
-| Constant | Value | Description |
-|----------|-------|-------------|
-| PRIV_USER_ADMIN | 0 | User management |
-| PRIV_SYS_ADMIN | 1 | System admin |
-| PRIV_DATA_ADMIN | 2 | Data management (truncate, index) |
-| PRIV_UDF_ADMIN | 3 | UDF management |
-| PRIV_SINDEX_ADMIN | 4 | Secondary index management |
-| PRIV_READ | 10 | Read records |
-| PRIV_READ_WRITE | 11 | Read and write |
-| PRIV_READ_WRITE_UDF | 12 | Read, write, and UDF |
-| PRIV_WRITE | 13 | Write records |
-| PRIV_TRUNCATE | 14 | Truncate operations |
+| Constant | Value | Name | Description |
+|----------|-------|------|-------------|
+| PRIV_USER_ADMIN | 0 | user-admin | User management |
+| PRIV_SYS_ADMIN | 1 | sys-admin | System admin |
+| PRIV_DATA_ADMIN | 2 | data-admin | Data management (truncate, index) |
+| PRIV_UDF_ADMIN | 3 | udf-admin | UDF management |
+| PRIV_SINDEX_ADMIN | 4 | sindex-admin | Secondary index management |
+| PRIV_READ | 10 | read | Read records |
+| PRIV_READ_WRITE | 11 | read-write | Read and write |
+| PRIV_READ_WRITE_UDF | 12 | read-write-udf | Read, write, and UDF |
+| PRIV_WRITE | 13 | write | Write records |
+| PRIV_TRUNCATE | 14 | truncate | Truncate operations |
 
 ---
 
@@ -239,6 +240,8 @@ For `batch_write`, also inspect `br.in_doubt` before retrying (write may have ap
 | 200 | AEROSPIKE_ERR_INDEX_FOUND | IndexFoundError |
 | 201 | AEROSPIKE_ERR_INDEX_NOT_FOUND | IndexNotFound |
 | 210 | AEROSPIKE_ERR_QUERY_ABORTED | QueryAbortedError |
+
+Query timeouts also raise `AerospikeTimeoutError` (wire code **212**, no exported constant; `BatchRecord.result` carries 212).
 
 ---
 

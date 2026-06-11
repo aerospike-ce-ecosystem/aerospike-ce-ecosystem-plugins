@@ -41,6 +41,7 @@ Used by: `put()`, `remove()`, `touch()`, `append()`, `prepend()`, `increment()`,
 | socket_timeout | int | 30000 | Socket timeout (ms) |
 | total_timeout | int | 1000 | Total transaction timeout (ms) |
 | max_retries | int | 0 | Max retry attempts |
+| sleep_between_retries | int | 0 | Sleep between retries (ms) |
 | durable_delete | bool | false | Durable delete (Enterprise) |
 | key | int | POLICY_KEY_DIGEST | Key send policy (`POLICY_KEY_*`) |
 | exists | int | POLICY_EXISTS_IGNORE | Record existence policy (`POLICY_EXISTS_*`) |
@@ -80,6 +81,7 @@ Used by: `batch_read()`, `batch_operate()`, `batch_remove()`
 | socket_timeout | int | 30000 | Socket timeout (ms) |
 | total_timeout | int | 1000 | Total transaction timeout (ms) |
 | max_retries | int | 2 | Max retry attempts |
+| sleep_between_retries | int | 0 | Sleep between retries (ms) |
 | filter_expression | Any | | Expression filter |
 
 ---
@@ -98,6 +100,7 @@ Used by: `Query.results()`, `Query.foreach()`
 | socket_timeout | int | 30000 | Socket timeout (ms) |
 | total_timeout | int | 0 | Total timeout (0 = no limit) |
 | max_retries | int | 2 | Max retry attempts |
+| sleep_between_retries | int | 0 | Sleep between retries (ms) |
 | max_records | int | 0 | Max records to return (0 = all) |
 | records_per_second | int | 0 | Rate limit (0 = unlimited) |
 | filter_expression | Any | | Expression filter |
@@ -134,5 +137,6 @@ Used by: all `admin_*` methods, index operations, `truncate()`
 | `TTL_NAMESPACE_DEFAULT` | 0 | Use namespace default |
 | `TTL_NEVER_EXPIRE` | -1 | Never expire |
 | `TTL_DONT_UPDATE` | -2 | Keep existing TTL |
+| `TTL_CLIENT_DEFAULT` | -3 | Resolves to namespace default (no client-level default TTL) |
 
 Full constants reference: `./constants.md`

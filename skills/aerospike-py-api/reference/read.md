@@ -66,6 +66,7 @@ Read multiple records in a single network call. **Returns a `LazyBatchRecords` h
 
 - `lazy_records.to_dict()` → `dict[UserKey, AerospikeRecord]` (missing / failed records absent)
 - `lazy_records.to_numpy(dtype)` → `NumpyBatchRecords` (zero-copy structured array — the per-record buffer fill runs with the GIL released via `py.detach`)
+- `lazy_records.to_list()` → `list[bins_dict | None]` in request order (`None` at miss/failure; not cached). Collision-safe across sets, where `to_dict()` keeps only one record per `user_key`.
 - `lazy_records.batch_records` → `list[BatchRecord]` (compat — includes digest-only and failed records)
 
 `LazyBatchRecords` also implements the dict-like Mapping protocol so existing dict-style code keeps working without explicit `.to_dict()`:

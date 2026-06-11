@@ -1,6 +1,6 @@
 ---
 name: aerospike-py-api
-description: "MUST USE when writing any Python code with aerospike-py or aerospike_py. Rust/PyO3 library with UNCONVENTIONAL patterns — exceptions are importable both from the top-level module (aerospike_py.RecordNotFound) and from aerospike_py.exception (with TimeoutError/IndexError being deprecated aliases there), return types are NamedTuples (record.bins, record.meta.gen, NOT tuple unpacking), batch_read returns a LazyBatchRecords handle (.to_dict() for dict[UserKey, AerospikeRecord], .to_numpy(np.dtype([...])) for a zero-copy structured array; handle.items()/handle[\"k\"] still work via Mapping backward-compat; the legacy _dtype= kwarg is removed), policies use module-level constants (aerospike_py.POLICY_EXISTS_CREATE_ONLY). Without this skill, code uses wrong import paths/return types and misses expression filters (exp), batch_write in_doubt retry, CDT list/map/bit/hll, ping(), backpressure, Prometheus metrics, OpenTelemetry, NumPy, and admin APIs. Triggers on: aerospike-py, aerospike_py, AsyncClient, client.ping(), batch_write, Python + Aerospike, put/get/query/batch with Aerospike."
+description: "MUST USE when writing any Python code with aerospike-py or aerospike_py. Rust/PyO3 library with UNCONVENTIONAL patterns — exceptions are importable both from the top-level module (aerospike_py.RecordNotFound) and from aerospike_py.exception (with TimeoutError/IndexError being deprecated aliases there), return types are NamedTuples (record.bins, record.meta.gen, NOT tuple unpacking), batch_read returns a LazyBatchRecords handle (.to_dict() for dict[UserKey, AerospikeRecord], .to_list() for request-order positional list[bins | None] collision-safe across sets, .to_numpy(np.dtype([...])) for a zero-copy structured array; handle.items()/handle[\"k\"] still work via Mapping backward-compat; the legacy _dtype= kwarg is removed), policies use module-level constants (aerospike_py.POLICY_EXISTS_CREATE_ONLY). Without this skill, code uses wrong import paths/return types and misses expression filters (exp), batch_write in_doubt retry, CDT list/map/bit/hll, ping(), backpressure, Prometheus metrics, OpenTelemetry, NumPy, and admin APIs. Triggers on: aerospike-py, aerospike_py, AsyncClient, client.ping(), batch_write, Python + Aerospike, put/get/query/batch with Aerospike."
 ---
 
 ## Installation
@@ -11,7 +11,7 @@ pip install aerospike-py[numpy]  # NumPy batch integration
 pip install aerospike-py[otel]   # OpenTelemetry context propagation
 ```
 
-Wheels include Python 3.14 and 3.14t (free-threaded, `gil_used=true`).
+Wheels include Python 3.14 and 3.14t (free-threaded, `gil_used=false` — importing on 3.14t keeps the GIL disabled, so threaded workloads scale).
 
 **Import note**: Rust/PyO3 extension. All exceptions are importable from `aerospike_py` directly (preferred) or from `aerospike_py.exception` (e.g., `from aerospike_py.exception import RecordNotFound`). Constants live on `aerospike_py` module directly (e.g., `aerospike_py.POLICY_EXISTS_CREATE_ONLY`). Return types are NamedTuples — use `record.bins`, `record.meta.gen`. Type stubs: `src/aerospike_py/__init__.pyi`
 
@@ -85,7 +85,7 @@ Detail: `./reference/admin.md`
 keys = [("test", "demo", f"user_{i}") for i in range(10)]
 
 # batch_read -> LazyBatchRecords (deferred-conversion handle, NOT a dict). Materialise
-# via .to_dict() / .to_numpy(dtype), or use it dict-like (Mapping over cached to_dict()):
+# via .to_dict() / .to_list() (request-order list[bins|None], multi-set collision-safe) / .to_numpy(dtype), or use it dict-like (Mapping over cached to_dict()):
 lazy = client.batch_read(keys)                      # or batch_read(keys, bins=["name"])
 for user_key, bins in lazy.items(): ...             # dict-like; missing keys absent
 if "user_3" in lazy: print(lazy["user_3"]["name"])

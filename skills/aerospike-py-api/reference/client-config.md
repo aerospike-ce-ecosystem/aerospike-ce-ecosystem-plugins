@@ -14,7 +14,7 @@ Import from `aerospike_py.types`. Used by `aerospike.client(config)` and `AsyncC
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | hosts | list[tuple[str, int]] | **required** | Seed host addresses |
-| cluster_name | str | None | Expected cluster name |
+| cluster_name | str \| None | None | Expected cluster name |
 | auth_mode | int | AUTH_INTERNAL (0) | Authentication mode |
 | user | str | None | Username for authentication |
 | password | str | None | Password for authentication |
