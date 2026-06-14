@@ -62,7 +62,7 @@ if result.meta is not None:
 
 ### batch_read(keys, bins=None, policy=None) -> LazyBatchRecords
 
-Read multiple records in a single network call. **Returns a `LazyBatchRecords` handle** that wraps the raw Rust results. The async future itself completes with near-zero GIL cost (`Arc::new` + `Py::new`); materialisation is deferred to explicit method calls on the handle:
+Read multiple records in a single network call. **Returns a `LazyBatchRecords` handle** that wraps the raw Rust results — conversion is deferred to explicit method calls on the handle (the async future itself resolves with near-zero GIL cost):
 
 - `lazy_records.to_dict()` → `dict[UserKey, AerospikeRecord]` (missing / failed records absent)
 - `lazy_records.to_numpy(dtype)` → `NumpyBatchRecords` (zero-copy structured array — the per-record buffer fill runs with the GIL released via `py.detach`)
@@ -87,6 +87,12 @@ lazy_records = client.batch_read(keys, bins=["name", "age"])
 
 # Existence check (empty bins) -- handle is still dict-like; missing keys absent
 lazy_records = client.batch_read(keys, bins=[])
+
+# Positional list -- aligned 1:1 with `keys`; None at miss/failure (collision-safe across sets)
+results = client.batch_read(keys, bins=["name"]).to_list()
+for key, bins in zip(keys, results):
+    if bins is not None:        # bins == {} for a header-only hit, None for miss/failure
+        print(key, bins["name"])
 
 # Async
 lazy_records = await async_client.batch_read(keys, bins=["name", "age"])
