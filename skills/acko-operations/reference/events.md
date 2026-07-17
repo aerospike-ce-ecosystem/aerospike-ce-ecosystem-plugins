@@ -45,7 +45,8 @@ Catalog of Kubernetes events emitted by the ACKO operator. Count grows over rele
 | `DynamicConfigRollbackFailed` | Warning | Rollback itself failed; cluster transitioning to `phase=ConfigDegraded` |
 | `DynamicConfigDegraded` | Warning | `ConditionDynamicConfigDegraded=True` set; reconciliation halts until manual intervention |
 | `ConfigDegradedSkip` | Warning | Reconcile skipped because the cluster is in `phase=ConfigDegraded` (message: `"Reconcile skipped due to ConfigDegraded phase"`; repeats every ~60s until resolved) |
-| `DynamicConfigRecovered` | Normal | `ConfigDegraded` resolved (config reverted / pods converged back to spec) |
+
+> There is **no recovery event** when `ConfigDegraded` is resolved — the operator emits nothing on convergence. Observe recovery via `status.phase` returning to `Completed` and the `DynamicConfigDegraded` condition being removed.
 
 ---
 
