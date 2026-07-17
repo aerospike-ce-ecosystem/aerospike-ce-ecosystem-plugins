@@ -5,241 +5,39 @@ description: "Systematic 6-step diagnosis procedure for ACKO-managed Aerospike C
 
 # ACKO Cluster Debugging Procedure
 
-This skill provides the systematic procedure to follow when an ACKO-managed Aerospike CE cluster reports a problem. It encodes:
-
-1. The 6-step ordering Aerospike SREs use during real outages,
-2. The CE 8.1-specific config pitfalls that surface as cryptic boot failures,
-3. A remediation matrix mapping observed symptoms to concrete fixes.
-
-For routine reads (`ackoctl k8s cluster list`, `ackoctl record get`, …) the CLI is self-describing — use `ackoctl <noun> --help` for shape. Load this skill when something is actually broken.
+The systematic procedure for a broken ACKO-managed Aerospike CE cluster: (1) the 6-step ordering Aerospike SREs use during real outages, (2) CE 8.1 config pitfalls that surface as cryptic boot failures, (3) a remediation matrix mapping symptoms to fixes. Full command blocks for every step: [`./reference/playbook.md`](./reference/playbook.md). For routine reads the CLI is self-describing (`ackoctl <noun> --help`) — load this skill when something is actually broken.
 
 ## Tool routing — ackoctl first, kubectl fallback
 
-Prefer `ackoctl` for **both** planes. It goes through cluster-manager, which is the authoritative source for AerospikeCluster state (it normalises CR status fields, classifies K8s events, and enforces workspace ACL). Fall back to `kubectl` / direct `asinfo` only when `ackoctl` is unavailable, or when a field the cluster-manager summary does not surface yet is needed.
+Prefer `ackoctl` for **both** planes — it goes through cluster-manager, the authoritative source for AerospikeCluster state (normalises CR status, classifies K8s events, enforces workspace ACL). Data plane: `ackoctl cluster info` / `info --command=...` / `query exec` / `record get` / `set list`. K8s plane: `ackoctl k8s cluster list / get / reconcile / scale / logs / events` (requires cluster-manager `K8S_MANAGEMENT_ENABLED=true`; on 404, use `kubectl`). Fall back to `kubectl` / direct `asinfo` only when `ackoctl` is unavailable or a field isn't surfaced yet.
 
-- **Data plane** — `ackoctl cluster info`, `ackoctl info --command=...`, `ackoctl query exec`, `ackoctl record get`, `ackoctl set list`.
-- **K8s plane** — `ackoctl k8s cluster list / get / reconcile / scale`, `ackoctl k8s cluster logs`, `ackoctl k8s cluster events`. Requires cluster-manager started with `K8S_MANAGEMENT_ENABLED=true`; if `ackoctl k8s cluster list` returns a 404, fall back to `kubectl` for the K8s plane.
+## Cluster selection & mutation safety
 
-If `ackoctl` is not installed or no context is configured, tell the user:
+Map the user's wording ("in dev", "prod-us") to an ackoctl context via `--context=<name>`; if ambiguous, list `ackoctl config view -o yaml` and ask (`{ctx}` = resolved context). **Confirm with the user before any state-mutating call** — `record put`/`delete`, `cluster configure-namespace`, `info --allow-write` (`set-config:`/`recluster:`), `index create`/`delete`, `k8s cluster scale`/`reconcile`, `udf upload`/`remove`, `admin user/role *`, `connection delete` (cascades attached notes). Prefer the no-side-effect read verbs for diagnosis: `k8s cluster get`, `info` (no `--allow-write`), `query exec`, `record get`.
 
-> ackoctl is not configured in this session. Install via `curl -fsSL https://raw.githubusercontent.com/aerospike-ce-ecosystem/ackoctl/main/install.sh | sh` and run `ackoctl config set-context <name> --server=<url> --token=<jwt> --workspace-id=<ws>` to point at a cluster-manager. You may proceed with `kubectl`-only diagnosis in the meantime, but data-plane probes (`asinfo`, record sampling, query) will go through `kubectl exec` rather than the typed cluster-manager surface.
-
-The `ackoctl` skill covers install and configuration in full.
-
-## Cluster selection
-
-Map the user's wording ("in dev", "prod-us") to the configured ackoctl context via `--context=<name>`; if ambiguous or unnamed, list `ackoctl config view -o yaml` and ask. Below, `{ctx}` is the resolved context (omit `--context` for current-context).
-
-## Mutation commands — confirm before invoking
-
-Confirm with the user before any state-mutating ackoctl call (blast radius is theirs to approve): `record put`/`delete`, `cluster configure-namespace`, `info --allow-write` (`set-config:`/`recluster:`), `index create`/`delete`, `k8s cluster scale`/`reconcile`, `udf upload`/`remove`, `admin user/role *`, `connection delete` (cascades attached notes). Prefer the no-side-effect read verbs for diagnosis: `k8s cluster get`, `info` (no `--allow-write`), `query exec`, `record get`.
+If `ackoctl` is not installed or no context is configured, tell the user: install via `curl -fsSL https://raw.githubusercontent.com/aerospike-ce-ecosystem/ackoctl/main/install.sh | sh`, then `ackoctl config set-context <name> --server=<url> --token=<jwt> --workspace-id=<ws>`; kubectl-only diagnosis can proceed meanwhile (data-plane probes go through `kubectl exec` instead). The `ackoctl` skill covers install and configuration in full.
 
 ## Debugging procedure
 
-Execute these steps in order. Stop and report findings as soon as you identify the root cause.
+Execute in order; stop and report as soon as the root cause is identified. Command blocks per step: [`./reference/playbook.md`](./reference/playbook.md).
 
-### Step 1 — Gather cluster overview
-
-**Data-plane discovery via ackoctl.** The user must have a connection profile registered with cluster-manager (created via the UI or `ackoctl connection create`).
-
-If the user has not specified a `CONN_ID`, list available profiles first:
-
-```bash
-# 1. Find an existing connection profile to drive the diagnosis
-ackoctl --context={ctx} connection list
-# 2. If the list is empty, create one (mutation — confirm first):
-#    ackoctl connection create --name <name> --host <host> --port 3000
-```
-
-Then run discovery against the selected `CONN_ID`:
-
-```bash
-ackoctl --context={ctx} cluster info <CONN_ID> -o yaml
-ackoctl --context={ctx} info <CONN_ID> --command='statistics'
-ackoctl --context={ctx} info <CONN_ID> --command='status'
-```
-
-Use `statistics` output to see `cluster_size`, `migration_status`, `stop_writes`, etc. across all nodes. `cluster info` already aggregates nodes, namespaces, sets and sindex counts.
-
-**K8s-plane status — prefer ackoctl** (cluster-manager started with `K8S_MANAGEMENT_ENABLED=true`):
-
-```bash
-ackoctl --context={ctx} k8s cluster list                                            # all CRs in the workspace
-ackoctl --context={ctx} k8s cluster list --workspace=<ws>                           # explicit workspace filter
-ackoctl --context={ctx} k8s cluster get <ns>/<name> -o yaml                         # phase, size, conditions, dynamicConfigStatus
-ackoctl --context={ctx} k8s cluster events <ns>/<name> --since=30m                  # classified events
-ackoctl --context={ctx} k8s cluster logs <ns>/<name> --pod=<pod> --container=aerospike-server --since=5m --tail=200
-```
-
-The CR phase, size, conditions, and migration status are all in the `k8s cluster get` payload — no need to shell out for every field.
-
-**`kubectl` fallback** (when K8s tools aren't exposed): `kubectl get asc <name> -n <ns> -o jsonpath='{.status.phase}'` (or `.phaseReason` / `.conditions` / `.size` / `.migrationStatus` / `.aerospikeClusterSize`).
-
-### Step 2 — Branch based on phase
-
-#### If Phase = `Error`
-
-```bash
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.lastReconcileError}'
-kubectl get events -n <ns> --field-selector involvedObject.name=<name> --sort-by='.lastTimestamp' | tail -20
-```
-
-Check for invalid `aerospikeConfig` (parse errors), image pull failures, resource quota, webhook failures. **Note:** the reconcile circuit breaker surfaces as `phase=BackoffActive` (not `Error`) — see below.
-
-#### If Phase = `BackoffActive` (circuit breaker)
-
-```bash
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.conditions[?(@.type=="ReconcileHealthy")]}' | jq
-```
-
-- `ReconcileHealthy=True` → transient (pod not ready, image pull, capacity); auto-retries with backoff.
-- `ReconcileHealthy=False, reason=PermanentError` → validation/configgen/Secret error; no retry. Fix the root cause, then toggle `spec.paused: true → null` (clears stale `failedReconcileCount`/`lastReconcileError`) or edit the spec.
-
-#### If Phase = `ACLSync` (stuck)
-
-ACL sync is failing — the cluster does **not** reach `Completed` while ACL is unsynced; it requeues ~30s. Check the `ACLSynced` condition, `ACLSyncError` event, and that the password Secret exists with the right key.
-
-```bash
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.conditions[?(@.type=="ACLSynced")]}' | jq
-```
-
-#### If Phase = `WaitingForMigration`
-
-```bash
-# Check cluster-level migration status
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.migrationStatus}' | jq .
-# Per-pod migration partitions
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods}' | jq 'to_entries[] | {pod: .key, migrating: .value.migratingPartitions}'
-# Direct asinfo check via ackoctl
-ackoctl --context={ctx} info <CONN_ID> --command='statistics' | tr ';' '\n' | grep migrate
-```
-
-This is usually normal during scale-down. Report `migrationStatus.remainingPartitions` progress and advise waiting.
-
-#### If Phase = `InProgress` (stuck > 5 minutes)
-
-```bash
-kubectl get pods -n <ns> -l aerospike.io/cr-name=<name> -o wide
-kubectl get pvc -n <ns> -l aerospike.io/cr-name=<name>
-kubectl describe pod <pending-or-failing-pod> -n <ns> | tail -30
-kubectl -n aerospike-operator logs -l control-plane=controller-manager --tail=100
-```
-
-Check for:
-- Pending PVCs (StorageClass not found or no capacity)
-- ImagePullBackOff (wrong image name or no pull secret)
-- Scheduling failures (insufficient CPU/memory, node affinity mismatch)
-
-#### If Phase = `Completed` but user reports issues
-
-**Prefer ackoctl** for data-plane probes:
-
-```bash
-# Status, statistics, namespace details — per-node where useful.
-ackoctl --context={ctx} info <CONN_ID> --command='status'
-ackoctl --context={ctx} info <CONN_ID> --command='statistics'
-ackoctl --context={ctx} info <CONN_ID> --command='namespace/<ns-name>'
-# Sample-record sanity check
-ackoctl --context={ctx} query exec <CONN_ID> --namespace=<ns-name> --set=<set> --max-records=5
-# Filtered probe — useful for narrowing in on records that match a suspected
-# fault signal, e.g. records past a TTL boundary.
-ackoctl --context={ctx} query exec <CONN_ID> \
-  --namespace=<ns-name> --set=<set> \
-  --bin=age --op=between --value=18 --value2=99 \
-  --select=name,age --max-records=20
-```
-
-When `query exec` returns a truncation marker, the result set was capped by `--max-records` (or the server-side ceiling). For diagnosis this usually means "there are more matching records than you asked to see"; either tighten the predicate or raise `--max-records` for the next call. Don't silently report the partial set as the whole picture.
-
-`kubectl exec` fallback (only if `ackoctl` is unavailable):
-
-```bash
-kubectl get pods -n <ns> -l aerospike.io/cr-name=<name>
-kubectl exec -n <ns> <pod> -c aerospike-server -- asinfo -v status
-kubectl exec -n <ns> <pod> -c aerospike-server -- asinfo -v 'statistics' | tr ';' '\n' | grep cluster_size
-kubectl exec -n <ns> <pod> -c aerospike-server -- asinfo -v 'namespace/<ns-name>'
-```
-
-Check for:
-- Split cluster (`cluster_size` mismatch across pods)
-- Namespace stop-writes (near capacity)
-- Connection issues (`proto-fd-max` reached)
-
-#### If Phase = `ConfigDegraded`
-
-```bash
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.conditions[?(@.type=="DynamicConfigDegraded")]}' | jq
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods[*].dynamicConfigChanges}' | jq
-```
-
-Meaning: a 2PC dynamic config update failed AND the LIFO rollback also failed. Different pods now hold different runtime configs. The operator **halts reconciliation** — every reconcile is skipped with a `ConfigDegradedSkip` Warning event (requeued ~60s) so the broken change cannot be re-applied and amplify the divergence. **Do not** flip `enableDynamicConfigUpdate` or re-apply the change. Recovery is manual: revert `spec.aerospikeConfig` to the last known-good value, then cold-restart the pods / reset the phase so reconciliation resumes. Recovery is complete when `phase=Completed` and the `DynamicConfigDegraded` condition clears (`DynamicConfigRecovered` event).
-
-### Step 3 — Check pod-level issues
-
-For any pods not in `Running` state — prefer ackoctl, fall back to kubectl:
-
-```bash
-# ackoctl path
-ackoctl --context={ctx} k8s cluster logs <ns>/<name> --pod=<pod> --container=aerospike-server --since=10m --tail=200
-ackoctl --context={ctx} k8s cluster logs <ns>/<name> --pod=<pod> --container=aerospike-server --previous   # if CrashLoopBackOff
-
-# kubectl fallback
-kubectl describe pod <pod> -n <ns>
-kubectl logs -n <ns> <pod> -c aerospike-server
-kubectl logs -n <ns> <pod> -c aerospike-server --previous
-```
-
-Common pod-level issues:
-- **CrashLoopBackOff**: config parse error (check for removed 7.x parameters in CE 8.1), OOM, or `data-size` below 512 MiB minimum
-- **ImagePullBackOff**: wrong image name or missing imagePullSecret
-- **Pending**: insufficient resources or PVC not bound
-
-### Step 4 — Check operator logs
-
-```bash
-kubectl -n aerospike-operator logs -l control-plane=controller-manager --tail=200
-```
-
-Look for:
-- Reconciliation errors
-- Webhook rejection messages
-- Resource creation failures
-
-### Step 5 — Check events timeline
-
-**Prefer ackoctl** (already classifies each event into `Rolling Restart`, `Configuration`, `Scaling`, `Network`, `Rack Management`, …):
-
-```bash
-ackoctl --context={ctx} k8s cluster events <ns>/<name> --since=60m
-```
-
-`kubectl` fallback (raw, unclassified):
-
-```bash
-kubectl get events -n <ns> --field-selector involvedObject.name=<name> --sort-by='.lastTimestamp'
-```
-
-Key events to look for:
-- `CircuitBreakerActive`: failure threshold reached → `phase=BackoffActive`, `acko_circuit_breaker_active=1`
-- `RestartFailed`: pod restart failed during rolling update
-- `ScaleDownDeferred`: migration blocking scale-down
-- `DynamicConfigStatusFailed`: dynamic config change failed
-- `ACLSyncError`: ACL synchronization failed (→ `phase=ACLSync`, not Completed)
-- `ConfigDegradedSkip`: reconcile skipped because `phase=ConfigDegraded` (repeats ~60s until manual intervention)
-- `TemplateResolutionError`: template parsing failed
-- `ReadinessGateBlocking`: readiness gate not satisfied
-
-### Step 6 — Check dynamic config status (if applicable)
-
-```bash
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods}' | jq '.[].dynamicConfigStatus'
-```
-
-If status is `Failed`, the changed parameter is not dynamically changeable. Advise setting `enableDynamicConfigUpdate: false` to force a rolling restart.
+1. **Gather cluster overview** — pick/confirm a `CONN_ID` (`ackoctl connection list`); data plane via `ackoctl cluster info` + `info --command='statistics'|'status'`; K8s plane via `ackoctl k8s cluster get <ns>/<name> -o yaml` (phase, size, conditions, migration in one payload) and `k8s cluster events`.
+2. **Branch on `status.phase`:**
+   - `Error` → read `status.lastReconcileError` + recent events: config parse errors, image pull, quota, webhook failures. (The circuit breaker surfaces as `BackoffActive`, not `Error`.)
+   - `BackoffActive` → inspect `ReconcileHealthy`. `True` = transient, auto-retries (backoff capped 5 min). `False/PermanentError` = validation/configgen/Secret error, **no retry**: fix root cause, then toggle `paused: true → null` or edit spec.
+   - `ACLSync` (stuck) → ACL sync failing; cluster will NOT reach `Completed` (requeues ~30s). Check `ACLSynced` condition, `ACLSyncError` event, password Secret.
+   - `WaitingForMigration` → usually normal during scale-down; report `migrationStatus.remainingPartitions`, advise waiting.
+   - `InProgress` stuck >5 min → pods/PVCs/describe/operator logs: Pending PVC, ImagePullBackOff, scheduling failure.
+   - `Completed` but user reports issues → data-plane probes (`info`, `query exec` sampling); check split cluster (`cluster_size` mismatch), stop-writes, `proto-fd-max` exhaustion.
+   - `ConfigDegraded` → 2PC dynamic config apply AND LIFO rollback both failed; pods hold divergent runtime configs and the operator **halts reconciliation** (`ConfigDegradedSkip` Warning, ~60s requeue). **Do not** flip `enableDynamicConfigUpdate` or re-apply. Recovery is manual: revert `spec.aerospikeConfig` to last-known-good, then cold-restart pods / reset the phase; done when `phase=Completed` and `DynamicConfigDegraded` clears (`DynamicConfigRecovered`). Diagnose via `DynamicConfigDegraded` + `status.pods[*].dynamicConfigChanges`.
+3. **Pod-level issues** — logs (`--previous` for CrashLoopBackOff) via `ackoctl k8s cluster logs` or kubectl. CrashLoopBackOff → config parse error (removed 7.x params), OOM, `data-size` < 512 MiB; ImagePullBackOff → image/pull-secret; Pending → resources/PVC.
+4. **Operator logs** — `kubectl -n aerospike-operator logs -l control-plane=controller-manager --tail=200`: reconcile errors, webhook rejections, resource-creation failures.
+5. **Events timeline** — `ackoctl k8s cluster events` (classified) or raw kubectl events. Key reasons: `CircuitBreakerActive` (→ `BackoffActive`, `acko_circuit_breaker_active=1`), `RestartFailed`, `ScaleDownDeferred`, `DynamicConfigStatusFailed`, `ACLSyncError`, `ConfigDegradedSkip`, `TemplateResolutionError`, `ReadinessGateBlocking`.
+6. **Dynamic config status** — `status.pods[].dynamicConfigStatus`; `Failed` = parameter not dynamic → advise `enableDynamicConfigUpdate: false` for a rolling restart.
 
 ## Remediation actions
 
-After identifying the root cause, suggest the specific fix:
+Phase-keyed fixes (`BackoffActive`, `ConfigDegraded`, `ACLSync`, dynamic-config `Failed`) are in the step-2 branches above. Additionally:
 
 | Issue | Remediation |
 |-------|-------------|
@@ -248,13 +46,8 @@ After identifying the root cause, suggest the specific fix:
 | PVC Pending | Check StorageClass exists and has capacity |
 | Resource insufficient | Reduce resource requests or add nodes to K8s cluster |
 | CE constraint violation | Fix CR to comply (size ≤ 8, namespaces ≤ 2, no xdr/tls, CE image ≥ ce-8) |
-| `BackoffActive` (transient) | Fix root cause; operator auto-retries with backoff |
-| `BackoffActive` + `ReconcileHealthy=False/PermanentError` | Fix root cause, then toggle `paused: true → null` or edit spec |
-| Dynamic config failed | Set `enableDynamicConfigUpdate: false` for rolling restart |
-| `ConfigDegraded` (reconcile halted) | Revert spec to last known-good config, then cold-restart pods / reset the phase |
 | Split cluster | Verify network connectivity, check `cluster-name` consistency. Compare `status.aerospikeClusterSize` with `status.size` |
 | Stop writes | Increase storage capacity or reduce data volume |
-| ACL sync error (`phase=ACLSync`) | Verify Secret exists with correct password key; check role scopes are valid |
 | On-demand op `Error` | Unknown `kind` or `podList` names no existing pod → fix/clear: `kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"operations":null}}'` |
 
 ## CE 8.1 common pitfalls

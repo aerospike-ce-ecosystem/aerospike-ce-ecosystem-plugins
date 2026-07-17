@@ -166,6 +166,8 @@ kubectl get asc <name> -o jsonpath='{.status.operationStatus}' | jq .
 kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"operations":null}}'
 ```
 
+Clearing `spec.operations` also unblocks a stuck-`InProgress` operation. Via aerospike-cluster-manager API: `DELETE /api/k8s/clusters/{namespace}/{name}/operations`.
+
 ---
 
 ## 4. ACL Management
@@ -350,6 +352,21 @@ Parsing is conservative: a node whose `migrate_partitions_remaining` cannot be r
 
 ---
 
+## 11b. Clone Cluster
+
+Create a copy of an existing cluster with a new name (via aerospike-cluster-manager API or manually):
+
+```bash
+# Manual clone: export existing CR, strip status/operations, change name
+kubectl get asc <source> -n <ns> -o json | \
+  jq 'del(.status, .metadata.resourceVersion, .metadata.uid, .metadata.creationTimestamp, .spec.operations, .spec.paused) | .metadata.name = "<new-name>"' | \
+  kubectl apply -f -
+```
+
+The clone preserves the full spec (aerospikeConfig, storage, monitoring, ACL) but strips `operations` and `paused` fields.
+
+---
+
 ## 12. Cluster Deletion
 
 ```bash
@@ -361,3 +378,26 @@ Sequence:
 2. `cascadeDelete: true`: PVCs automatically deleted
 3. `cascadeDelete: false`: PVCs retained; manual cleanup: `kubectl delete pvc -n <ns> -l aerospike.io/cr-name=<name>`
 4. `FinalizerRemoved` event -> CR deleted
+
+---
+
+## 13. OpenTelemetry Observability (operator)
+
+The operator can export its **reconcile traces, metrics, and logs** to an OTLP/gRPC collector — off by default. Enable it on a running cluster with a Helm upgrade (no CR change):
+
+```bash
+helm upgrade acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  -n aerospike-operator --reuse-values \
+  --set observability.otel.enabled=true \
+  --set observability.otel.endpoint=otel-collector.observability.svc.cluster.local:4317
+```
+
+The Deployment rolls; the new pod logs `OpenTelemetry export enabled`. Confirm export is flowing — a blocked egress instead logs `missing address` / `context deadline exceeded`:
+
+```bash
+kubectl -n aerospike-operator logs -l control-plane=controller-manager --tail=50 | grep -iE 'otel|export'
+```
+
+The collector then receives reconcile spans (`Reconcile` → `reconcileCluster` → `reconcileRacks`), the `acko_*` + controller-runtime metrics, and operator logs. Disable again with `--set observability.otel.enabled=false`.
+
+Config rules — `enabled` + `endpoint` both required, OTLP/gRPC endpoint scheme, the auto-added NetworkPolicy egress (`observability.otel.collectorPort`) — are covered in **acko-deploy**.
