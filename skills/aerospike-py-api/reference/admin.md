@@ -247,6 +247,25 @@ Query timeouts also raise `AerospikeTimeoutError` (wire code **212**, no exporte
 
 Every server result code maps to its real proto.h wire code (there is no `-1` catch-all), so `BatchRecord.result` and error messages always carry the actual code. All security/ACL/quota codes (53–83 range, e.g. `InvalidPassword`=62, `InvalidCredential`=65, `InvalidRole`=70, `QuotaExceeded`=83) raise **`AdminError`**; unlisted codes (e.g. index 202–206, query 211/213–215) raise the generic `ServerError` with the correct code in the message.
 
+### Structured error codes — `exc.result_code`
+
+Every Aerospike exception carries an integer **`.result_code`** attribute (base `AerospikeError` and every subclass) — branch on it instead of parsing the `AEROSPIKE_ERR (<code>)` message string. Server errors (`ServerError`, and batch `BatchError` / `BatchLastError`) carry the real wire result code on the instance (e.g. `FailForbidden`=22, `RecordNotFound`=2, `RecordExistsError`=5 — the same codes as the table above). Client-side errors — `ClusterError` (connection / invalid node / no-more-connections), `AerospikeTimeoutError`, `InvalidArgError`, and the `ClientError` catch-all — carry the sentinel **`-1`** (`CLIENT_SIDE_RESULT_CODE`, mirroring the C client's `AEROSPIKE_ERR_CLIENT`); the class-level default is also `-1`. The message string still embeds `AEROSPIKE_ERR (<code>)` as before. (ADR-0027)
+
+```python
+from aerospike_py import ServerError, AerospikeError
+
+try:
+    client.put(key, {"n": 1})
+except ServerError as e:
+    if e.result_code == 22:      # FailForbidden — e.g. forbidden/read-only namespace
+        handle_forbidden()
+    else:
+        raise
+except AerospikeError as e:
+    log.warning("aerospike op failed (code=%s)", e.result_code)  # -1 == client-side
+    raise
+```
+
 ---
 
 ## Exception Hierarchy

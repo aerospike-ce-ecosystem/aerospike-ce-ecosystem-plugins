@@ -11,6 +11,7 @@ Per-release notes are also auto-published to [GitHub Releases](https://github.co
 
 ### Changed
 
+- `aerospike-py-api` skill — documented the new `.result_code: int` attribute on Aerospike exceptions (server errors carry the real wire code, e.g. `FailForbidden`=22; client-side errors carry the `-1` `CLIENT_SIDE_RESULT_CODE` sentinel) as the structured way to branch on failures instead of parsing message strings (aerospike-py ADR-0027, PR #413).
 - Plugin manifest (`plugin.json`) and `marketplace.json` descriptions rewritten to cover all 9 current skills.
 - CI workflow prompts (`issue-planner`, `agent-implement`, `pr-reviewer`) updated from the obsolete "5 skills + 1 agent" structure to the current 9-skill layout.
 - `README.md` — added the missing `acko-e2e-test` and `bug-reporter` skills to the Skills table.
