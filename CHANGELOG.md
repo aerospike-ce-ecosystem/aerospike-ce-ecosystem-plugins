@@ -18,6 +18,7 @@ Per-release notes are also auto-published to [GitHub Releases](https://github.co
 
 ### Fixed
 
+- Removed the phantom `DynamicConfigRecovered` event from `acko-operations/reference/events.md` and `acko-debugging/SKILL.md` — the ACKO operator emits no event when `ConfigDegraded` resolves (`internal/controller/events.go` defines no such reason); recovery is observed via `status.phase` returning to `Completed` and the `DynamicConfigDegraded` condition being removed.
 - Corrected stale `ackoctl` verbs (`k8s pod logs` → `k8s cluster logs`, `udf register` → `udf upload`) and CE 7.x namespace parameters (`stop-writes-pct` → `stop-writes-sys-memory-pct`, `high-water-*-pct` → `evict-used-pct`) in command examples across `acko-debugging`, `ackoctl`, `acko-operations`, and `README.md`.
 - Replaced `ackoctl k8s events list` with `ackoctl k8s cluster events`, matching the actual location of the events verb under the `k8s cluster` noun (`ackoctl/SKILL.md`, `acko-debugging/SKILL.md`, `README.md`).
 - Corrected the `cluster configure-namespace` flags in `ackoctl/reference/commands.md` from `--namespace`/`--set` to the repeatable `--name`/`--param` flags used by `ackoctl/SKILL.md` and the CLI.
