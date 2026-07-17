@@ -152,6 +152,8 @@ client.index_string_create("test", "users", "city", "users_city_idx")
 client.index_remove("test", "users_age_idx")
 ```
 
+All `index_*_create` methods (sync and async) raise `IndexFoundError` if an index with that name already exists.
+
 ### Query Builder
 
 ```python

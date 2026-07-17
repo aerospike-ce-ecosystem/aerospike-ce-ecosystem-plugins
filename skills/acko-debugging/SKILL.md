@@ -172,7 +172,7 @@ kubectl get asc <name> -n <ns> -o jsonpath='{.status.conditions[?(@.type=="Dynam
 kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods[*].dynamicConfigChanges}' | jq
 ```
 
-Meaning: a 2PC dynamic config update failed AND the LIFO rollback also failed. Different pods now hold different runtime configs. The operator will attempt a cold restart on the next reconcile to converge to spec. **Do not** manually flip `enableDynamicConfigUpdate` or re-apply the change — let the cold restart run. If the cold-restart loop continues, the underlying value is invalid for the deployed hardware shape — revert spec to the last known-good value and re-apply. Recovery is complete when `phase=Completed` and the `DynamicConfigDegraded` condition clears.
+Meaning: a 2PC dynamic config update failed AND the LIFO rollback also failed. Different pods now hold different runtime configs. The operator **halts reconciliation** — every reconcile is skipped with a `ConfigDegradedSkip` Warning event (requeued ~60s) so the broken change cannot be re-applied and amplify the divergence. **Do not** flip `enableDynamicConfigUpdate` or re-apply the change. Recovery is manual: revert `spec.aerospikeConfig` to the last known-good value, then cold-restart the pods / reset the phase so reconciliation resumes. Recovery is complete when `phase=Completed` and the `DynamicConfigDegraded` condition clears (`DynamicConfigRecovered` event).
 
 ### Step 3 — Check pod-level issues
 
@@ -225,6 +225,7 @@ Key events to look for:
 - `ScaleDownDeferred`: migration blocking scale-down
 - `DynamicConfigStatusFailed`: dynamic config change failed
 - `ACLSyncError`: ACL synchronization failed (→ `phase=ACLSync`, not Completed)
+- `ConfigDegradedSkip`: reconcile skipped because `phase=ConfigDegraded` (repeats ~60s until manual intervention)
 - `TemplateResolutionError`: template parsing failed
 - `ReadinessGateBlocking`: readiness gate not satisfied
 
@@ -250,6 +251,7 @@ After identifying the root cause, suggest the specific fix:
 | `BackoffActive` (transient) | Fix root cause; operator auto-retries with backoff |
 | `BackoffActive` + `ReconcileHealthy=False/PermanentError` | Fix root cause, then toggle `paused: true → null` or edit spec |
 | Dynamic config failed | Set `enableDynamicConfigUpdate: false` for rolling restart |
+| `ConfigDegraded` (reconcile halted) | Revert spec to last known-good config, then cold-restart pods / reset the phase |
 | Split cluster | Verify network connectivity, check `cluster-name` consistency. Compare `status.aerospikeClusterSize` with `status.size` |
 | Stop writes | Increase storage capacity or reduce data volume |
 | ACL sync error (`phase=ACLSync`) | Verify Secret exists with correct password key; check role scopes are valid |

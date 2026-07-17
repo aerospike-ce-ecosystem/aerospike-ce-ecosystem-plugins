@@ -20,8 +20,8 @@ Exact `AerospikePhase` enum (operator `aerospikecluster_types.go`). There is no 
 | `ACLSync` | ACL roles/users syncing — **if stuck here, ACL sync is failing** (see below) |
 | `Paused` | Reconciliation suspended via `spec.paused: true` |
 | `Deleting` | Cluster deletion in progress |
-| `ConfigDegraded` | 2PC dynamic config apply AND LIFO rollback both failed; pods hold inconsistent runtime config |
-| `BackoffActive` | Reconcile circuit breaker tripped; requeue with exponential backoff |
+| `ConfigDegraded` | 2PC dynamic config apply AND LIFO rollback both failed; pods hold inconsistent runtime config; reconcile halts until manual intervention |
+| `BackoffActive` | Reconcile circuit breaker tripped; requeue with exponential backoff (capped at 5 min) |
 
 ### `Phase = ACLSync` (stuck) — ACL failure does NOT reach Completed
 
@@ -35,7 +35,7 @@ The reconcile-failure circuit breaker tripped (`failedReconcileCount` at max). E
 
 ### `Phase = ConfigDegraded` — 2PC rollback failed
 
-A 2-phase-commit dynamic config update had its apply fail mid-flight AND the LIFO rollback also fail, so pods hold different runtime configs. The operator cold-restarts on the next reconcile to converge to spec. To diagnose: read the `DynamicConfigDegraded=True` condition message and `status.pods[].dynamicConfigChanges` (per-path old/new/result). If the cold-restart loop persists, the value is invalid for the deployed hardware shape — revert the spec.
+A 2-phase-commit dynamic config update had its apply fail mid-flight AND the LIFO rollback also fail, so pods hold different runtime configs. The operator **halts reconciliation** for the cluster — it skips every reconcile with a `ConfigDegradedSkip` Warning event (requeue every ~60s) until a human intervenes, because re-running the reconcile could re-apply the broken change and amplify the divergence. To diagnose: read the `DynamicConfigDegraded=True` condition message and `status.pods[].dynamicConfigChanges` (per-path old/new/result). To recover: revert the offending value in `spec.aerospikeConfig` (roll back manually), then cold-restart the pods / reset the phase so reconciliation resumes.
 
 ---
 
@@ -106,7 +106,8 @@ status.phase == ACLSync (stuck)
 status.phase == ConfigDegraded
   -> 2PC dynamic config rollback failed
   -> read DynamicConfigDegraded condition + status.pods[].dynamicConfigChanges
-  -> operator will cold-restart on next reconcile
+  -> reconcile is HALTED (ConfigDegradedSkip events every ~60s) until you
+     revert the bad config and cold-restart / reset the phase
 
 status.phase == BackoffActive
   -> circuit breaker tripped

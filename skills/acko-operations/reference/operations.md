@@ -33,6 +33,8 @@ spec:
     maxIgnorablePods: 1           # Allow 1 stuck pod without blocking
 ```
 
+`maxIgnorablePods` semantics: an explicit `0` / `"0%"` means **ignore no unhealthy pods** (it is honored strictly, not bumped to 1); a non-zero percentage that rounds down to 0 still yields at least 1.
+
 ---
 
 ## 2. Rolling Update
@@ -74,7 +76,7 @@ The operator applies dynamic changes via 2-phase commit (April 2026+):
 |-------|----------|------------|
 | 1. Validate-all | Probe every pod with the proposed change (syntax + node responsiveness) | Abort whole update; no pod is mutated |
 | 2. Apply sequentially | Per-pod 30 s timeout (independent of reconciliation timeout) | Run LIFO rollback across already-updated pods |
-| 3. Rollback | Revert each updated pod in reverse order, per-pod 30 s timeout | Set `phase=ConfigDegraded`; cold restart on next reconcile |
+| 3. Rollback | Revert each updated pod in reverse order, per-pod 30 s timeout | Set `phase=ConfigDegraded`; reconciliation halts until manual intervention |
 
 This makes a dynamic config rollout effectively atomic from the user's perspective.
 
@@ -97,7 +99,9 @@ Top-level statuses:
 
 **Removing** a config key (not just changing it) always forces a rolling restart, even for an otherwise-dynamic param — "revert to server default" cannot be expressed as `set-config`.
 
-If phase 2 apply AND rollback both fail, the cluster enters `phase=ConfigDegraded` and `ConditionDynamicConfigDegraded=True`. The operator will cold-restart on the next reconcile to converge to spec — do not manually toggle `enableDynamicConfigUpdate` during this window.
+`namespace.replication-factor` (and legacy `memory-size`) are **never** applied dynamically — changing them triggers a synchronized cold restart even with `enableDynamicConfigUpdate: true` (a live `set-config` push would risk replica drift).
+
+If phase 2 apply AND rollback both fail, the cluster enters `phase=ConfigDegraded` and `ConditionDynamicConfigDegraded=True`. Reconciliation then **halts** — the operator skips every reconcile with a `ConfigDegradedSkip` Warning (requeue ~60s) until you intervene: revert the offending value in the spec, then cold-restart the pods / reset the phase. Do not toggle `enableDynamicConfigUpdate` or re-apply the change during this window.
 
 Example status snapshot of a partial rollback:
 
@@ -124,11 +128,15 @@ spec:
     rollingUpdateBatchSize: "50%"       # Per-rack override
 ```
 
+### What triggers a rolling (cold) restart
+
+Besides `image` and static `aerospikeConfig` changes, editing `spec.podService` or `spec.aerospikeNetworkPolicy` also rolls pods — those fields are part of the pod-spec hash the operator compares per pod.
+
 ---
 
 ## 3. On-Demand Restart
 
-Only one operation at a time. Remove from spec after completion. Batches gate on the same readiness-gate / migration guard as rolling restarts (a batch may pause until pods rejoin or migrations drain). The op goes to `status.operation.phase=Error` (not silent Completed) on an unknown `kind` or when `podList` names no existing pod.
+Only one operation at a time. Remove from spec after completion. Batches gate on the same readiness-gate / migration guard as rolling restarts (a batch may pause until pods rejoin or migrations drain) and honor `rackConfig.rollingUpdateBatchSize` with the same precedence as rolling restarts. The op goes to `status.operation.phase=Error` (not silent Completed) on an unknown `kind` or when `podList` names no existing pod.
 
 ### WarmRestart (SIGUSR1)
 
@@ -300,8 +308,10 @@ kubectl get asc <name> -o jsonpath='{.status.conditions[?(@.type=="ReconcileHeal
 Watching the breaker:
 
 ```promql
-acko_circuit_breaker_active{cluster="<name>"} == 1
+acko_circuit_breaker_active{name="<name>"} == 1
 ```
+
+Transient-failure backoff is exponential and capped at 5 minutes.
 
 ### WaitingForMigration
 
@@ -335,6 +345,8 @@ kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods}' | jq 'to_entries[] |
 ```
 
 The operator defers destructive actions (scale-down, pod removal) until `migrationStatus.inProgress` is `false`.
+
+Parsing is conservative: a node whose `migrate_partitions_remaining` cannot be read or parsed is treated as **still migrating** (destructive actions stay deferred), and an empty stat sweep preserves the previous `migrationStatus` instead of fabricating "0 partitions remaining".
 
 ---
 

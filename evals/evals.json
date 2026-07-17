@@ -40,7 +40,7 @@
     {
       "id": 7,
       "prompt": "An Aerospike cluster has fallen into phase=ConfigDegraded. The dynamic config rollback appears to have failed -- walk me through recovery",
-      "expected_output": "Inspect the DynamicConfigDegraded condition and status.pods[*].dynamicConfigChanges, then advise the user NOT to toggle enableDynamicConfigUpdate but to let the operator cold-restart on the next reconcile. If the loop persists, recommend reverting the spec to a known-good value",
+      "expected_output": "Inspect the DynamicConfigDegraded condition and status.pods[*].dynamicConfigChanges, explain that reconciliation is halted (ConfigDegradedSkip warnings every ~60s) until manual intervention, and advise the user NOT to toggle enableDynamicConfigUpdate but to revert the offending spec value to a known-good one, then cold-restart the pods / reset the phase so reconciliation resumes",
       "files": []
     },
     {

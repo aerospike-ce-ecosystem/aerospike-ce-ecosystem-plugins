@@ -98,9 +98,9 @@ Apply configuration changes without restarting pods. Only works for dynamically 
 1. **Phase 1 — validate-all**: operator probes every pod with the proposed change. If ANY pod rejects validation (syntax, node unresponsive), the entire update is aborted and no pod is mutated.
 2. **Phase 2 — apply sequentially**: each pod is updated with a per-pod 30 s timeout (independent of the reconciliation timeout).
 3. **On apply failure**: a LIFO rollback runs across pods that were already updated. Each rollback also has the per-pod 30 s budget.
-4. **On rollback failure**: cluster transitions to `phase = ConfigDegraded`, `ConditionDynamicConfigDegraded=True` is set, and the operator attempts a cold restart on the next reconcile.
+4. **On rollback failure**: cluster transitions to `phase = ConfigDegraded`, `ConditionDynamicConfigDegraded=True` is set, and reconciliation **halts** (`ConfigDegradedSkip` Warning every ~60s) until you intervene.
 
-This makes dynamic config rollouts atomic from the user's perspective: either every pod ends up on the new value, every pod ends up back on the old value, or you observe `ConfigDegraded` and the operator self-heals via cold restart.
+This makes dynamic config rollouts atomic from the user's perspective: either every pod ends up on the new value, every pod ends up back on the old value, or you observe `ConfigDegraded` and intervene manually (revert the value, cold-restart / reset the phase).
 
 ### Step 1: Enable Dynamic Config
 
@@ -146,7 +146,7 @@ Top-level statuses:
 
 ### When apply AND rollback both fail
 
-You will see `phase = ConfigDegraded`. Do NOT try to "fix" it by toggling `enableDynamicConfigUpdate` — the operator will cold-restart the pods on the next reconcile to reach a consistent state. See the `acko-debugging` skill for the full recovery flow.
+You will see `phase = ConfigDegraded` and reconciliation halts (`ConfigDegradedSkip` Warning events every ~60s). Do NOT try to "fix" it by toggling `enableDynamicConfigUpdate` — revert the offending value in the spec, then cold-restart the pods / reset the phase so reconciliation resumes. See the `acko-debugging` skill for the full recovery flow.
 
 ### Static Config Change (Requires Restart)
 
