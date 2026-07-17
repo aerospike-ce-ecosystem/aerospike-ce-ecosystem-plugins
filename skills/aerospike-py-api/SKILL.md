@@ -37,7 +37,7 @@ client.append(key, "name", "_sfx"); client.increment(key, "counter", 1)  # offse
 
 ## 3. Error Handling
 
-Catch specifics (`RecordNotFound`, `BackpressureError` = `max_concurrent_operations` exceeded, `AerospikeTimeoutError`) before the `AerospikeError` catch-all. Hierarchy: `AerospikeError` > `ClientError(BackpressureError)`, `ClusterError`, `InvalidArgError`, `AerospikeTimeoutError`, `RecordError(RecordNotFound, RecordExistsError, RecordGenerationError, FilteredOut, ...)`, `ServerError(AerospikeIndexError, QueryError, AdminError, UDFError)`. `aerospike_py.exception.TimeoutError`/`IndexError` are **deprecated aliases** (DeprecationWarning). Result-code table + batch error mapping: `./reference/admin.md`
+Catch specifics (`RecordNotFound`, `BackpressureError` = `max_concurrent_operations` exceeded, `AerospikeTimeoutError`) before the `AerospikeError` catch-all. Hierarchy: `AerospikeError` > `ClientError(BackpressureError)`, `ClusterError`, `InvalidArgError`, `AerospikeTimeoutError`, `RecordError(RecordNotFound, RecordExistsError, RecordGenerationError, FilteredOut, ...)`, `ServerError(AerospikeIndexError, QueryError, AdminError, UDFError)`. `aerospike_py.exception.TimeoutError`/`IndexError` are **deprecated aliases** (DeprecationWarning). Every exception exposes `.result_code: int` (server errors = real wire code, client-side = `-1`) — branch on it, don't parse messages. Result-code table + batch error mapping + `.result_code`: `./reference/admin.md`
 
 ## 4. Batch Operations
 
