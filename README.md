@@ -1,12 +1,12 @@
 # aerospike-ce-ecosystem
 
-Claude Code plugin for the Aerospike CE ecosystem — deploy clusters on Kubernetes with [ACKO](https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator) and build Python applications with [aerospike-py](https://github.com/aerospike-ce-ecosystem/aerospike-py).
+This Claude Code plugin helps you work with the Aerospike CE ecosystem. Use it to deploy clusters on Kubernetes with [ACKO](https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator) and build Python applications with [aerospike-py](https://github.com/aerospike-ce-ecosystem/aerospike-py).
 
 ## Installation
 
 ### From GitHub (recommended)
 
-Add the repository as a marketplace, then install:
+Register this repository as a marketplace, then install the plugin:
 
 ```bash
 # Step 1: Add as marketplace
@@ -38,34 +38,36 @@ claude plugin list
 
 | Skill | Trigger | Description |
 |-------|---------|-------------|
-| **acko-deploy** | "deploy Aerospike on Kubernetes" | Step-by-step guide to deploy CE clusters via AerospikeCluster CR — 9 scenarios from minimal to full-featured |
-| **acko-operations** | "scale Aerospike cluster" | Day-2 operations: scale, upgrade, dynamic config, warm restart, ACL, pause/resume, troubleshooting |
-| **acko-config-reference** | *(background)* | CE 8.1 parameter reference, CRD-to-conf mapping, webhook validation rules |
-| **acko-e2e-test** | "ACKO e2e test", "kind cluster test" | End-to-end test playbook — canonical scenarios, Ginkgo labels, mandatory `helm install` operator setup, release-verification performance checks |
+| **acko-deploy** | "deploy Aerospike on Kubernetes" | Guides you through nine CE deployment scenarios, from a minimal cluster to a full-featured `AerospikeCluster` CR |
+| **acko-operations** | "scale Aerospike cluster" | Covers Day-2 operations such as scaling, upgrades, dynamic configuration, warm restarts, ACL, pause/resume, and troubleshooting |
+| **acko-config-reference** | *(background)* | Provides the CE 8.1 parameter reference, CRD-to-conf mapping, and webhook validation rules |
+| **acko-e2e-test** | "ACKO e2e test", "kind cluster test" | Provides an end-to-end test playbook with canonical scenarios, Ginkgo labels, the required `helm install` operator setup, and release-verification performance checks |
 
 ### aerospike-py (Python Client)
 
 | Skill | Trigger | Description |
 |-------|---------|-------------|
-| **aerospike-py-api** | "use aerospike-py to ..." | Full API reference — AsyncClient, CRUD, batch, CDT, query, expressions, observe, admin |
-| **aerospike-py-fastapi** | "build FastAPI app with Aerospike" | Production-ready FastAPI patterns — lifespan, DI, CRUD endpoints, error handling, metrics |
+| **aerospike-py-api** | "use aerospike-py to ..." | Documents the full API, including AsyncClient, CRUD, batch, CDT, query, expressions, observe, and admin operations |
+| **aerospike-py-fastapi** | "build FastAPI app with Aerospike" | Shows production FastAPI patterns for lifespan, DI, CRUD endpoints, error handling, and metrics |
 
 ### Cluster Manager CLI (ackoctl)
 
 | Skill | Trigger | Description |
 |-------|---------|-------------|
-| **ackoctl** | "ackoctl", "manage Aerospike connection", "browse records", "register UDF", "scale cluster" | Drive [aerospike-cluster-manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager) via the [ackoctl](https://github.com/aerospike-ce-ecosystem/ackoctl) CLI — connections, cluster info, records/sets, queries, secondary indexes, operator notes, raw asinfo, K8s AerospikeCluster CRs, admin (users/roles), and Lua UDF modules. Multi-cluster ACKO friendly via kubeconfig-style contexts. |
-| **acko-debugging** | "CrashLoopBackOff", "phase=Error", "reconcile failure", "migration stuck" | Systematic 6-step diagnosis procedure for ACKO clusters with CE 8.1 pitfalls and a remediation matrix. Routes both data-plane and K8s-plane probes through ackoctl (`ackoctl cluster info`, `ackoctl info`, `ackoctl query exec`, `ackoctl k8s cluster get/list`, `ackoctl k8s cluster logs`, `ackoctl k8s cluster events`); falls back to `kubectl`/`asinfo` when ackoctl is unavailable. |
+| **ackoctl** | "ackoctl", "manage Aerospike connection", "browse records", "register UDF", "scale cluster" | Uses [aerospike-cluster-manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager) through the [ackoctl](https://github.com/aerospike-ce-ecosystem/ackoctl) CLI to manage connections, cluster info, records and sets, queries, secondary indexes, operator notes, raw asinfo, K8s `AerospikeCluster` CRs, users and roles, and Lua UDF modules. Kubeconfig-style contexts support multi-cluster ACKO environments. |
+| **acko-debugging** | "CrashLoopBackOff", "phase=Error", "reconcile failure", "migration stuck" | Provides a systematic six-step diagnostic procedure for ACKO clusters, including CE 8.1 pitfalls and a remediation matrix. It runs data-plane and K8s-plane probes through ackoctl (`ackoctl cluster info`, `ackoctl info`, `ackoctl query exec`, `ackoctl k8s cluster get/list`, `ackoctl k8s cluster logs`, `ackoctl k8s cluster events`) and falls back to `kubectl` or `asinfo` when ackoctl is unavailable. |
 
 ### Ecosystem support
 
 | Skill | Trigger | Description |
 |-------|---------|-------------|
-| **bug-reporter** | "버그 제보", "where do I file this issue", "report this to GitHub" | Routes a bug report to the correct `aerospike-ce-ecosystem` repo by symptom and generates a ready-to-paste GitHub issue body with the required reproduction context |
+| **bug-reporter** | "버그 제보", "where do I file this issue", "report this to GitHub" | Identifies the correct `aerospike-ce-ecosystem` repository from the reported symptoms and prepares a GitHub issue with the required reproduction details |
 
 ## ackoctl integration
 
-Live cluster access goes through the [ackoctl](https://github.com/aerospike-ce-ecosystem/ackoctl) Go CLI, which calls [aerospike-cluster-manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager)'s REST API at `/api/v1/*`. There is no MCP HTTP server in the loop, so there is no DNS-rebinding allowlist, no Origin allowlist, and no per-cluster `claude mcp add` step — the security surface is just the existing cluster-manager FastAPI auth (bearer JWT + workspace ACL).
+The plugin accesses live clusters through the [ackoctl](https://github.com/aerospike-ce-ecosystem/ackoctl) Go CLI. The CLI calls the [aerospike-cluster-manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager) REST API at `/api/v1/*`.
+
+This path does not use an MCP HTTP server. You therefore do not need a DNS-rebinding allowlist, an Origin allowlist, or a separate `claude mcp add` step for each cluster. Authentication remains within the existing cluster-manager FastAPI security model: bearer JWT plus workspace ACL.
 
 ```bash
 # 1. Install ackoctl
@@ -83,7 +85,7 @@ ackoctl connection list
 ackoctl record list <CONN_ID> --namespace=test --set=sample_set --page-size=5
 ```
 
-For multi-cluster ACKO, register one context per cluster-manager instance — naming convention `<env>` or `<region>`:
+For a multi-cluster ACKO environment, register one context for each cluster-manager instance. Name each context after its environment or region, such as `<env>` or `<region>`:
 
 ```bash
 ackoctl config set-context prod-us \
@@ -93,9 +95,9 @@ ackoctl config set-context prod-us \
 ackoctl --context=prod-us k8s cluster list
 ```
 
-Auth is bearer-token only — users bring their own OIDC JWT (Keycloak CLI, browser device flow, …). The workspace ACL on cluster-manager scopes every call; destructive verbs (`delete`, `remove`, mutation `info --allow-write`, `k8s cluster scale`) require `--yes` for non-interactive runs.
+Authentication uses bearer tokens. Provide an OIDC JWT obtained through a method such as the Keycloak CLI or a browser device flow. The cluster-manager workspace ACL limits the scope of every call. For non-interactive runs, destructive operations (`delete`, `remove`, mutation `info --allow-write`, and `k8s cluster scale`) also require `--yes`.
 
-The `ackoctl` skill covers install, configuration, and every command (connection / cluster / set / record / query / index / note / k8s / info / admin / udf). See `skills/ackoctl/reference/commands.md` for a one-line-per-command cheat sheet.
+The `ackoctl` skill covers installation, configuration, and every command group: connection, cluster, set, record, query, index, note, k8s, info, admin, and udf. See `skills/ackoctl/reference/commands.md` for a concise command reference.
 
 ## Prerequisites
 
@@ -112,7 +114,7 @@ The `ackoctl` skill covers install, configuration, and every command (connection
 
 ## Benchmark Results
 
-Evaluated with Claude Sonnet on real deployment tasks:
+The following results come from evaluating Claude Sonnet on real deployment tasks:
 
 | Metric | with skill | without skill | Improvement |
 |--------|-----------|---------------|-------------|
@@ -122,9 +124,10 @@ Evaluated with Claude Sonnet on real deployment tasks:
 | **Tool Calls** | 8.0 | 30.0 | -73.3% |
 
 Key findings:
-- Skills prevent the #1 CE mistake (enterprise-only config in CE clusters)
-- aerospike-py-specific patterns (NamedTuple access, Depends injection) are taught by skills
-- 7 production bonus features generated with skill vs 0 without
+
+- The skills prevented the most common CE configuration error: using enterprise-only settings in a CE cluster.
+- The skills explained aerospike-py-specific patterns such as NamedTuple access and `Depends` injection.
+- Runs with the skills produced seven additional production-oriented features, compared with none in the baseline runs.
 
 ## Development
 
@@ -144,7 +147,7 @@ claude -p "Deploy a single-node Aerospike cluster for development on a kind clus
 claude -p "Deploy a single-node Aerospike cluster for development on a kind cluster" --model sonnet --disable-plugins
 ```
 
-> The `e2e_pytest/` scenario suite includes a **multi-cluster + Keycloak OIDC** scenario (common-cluster web + dev/prod operator-cluster API + bitnami/keycloak realm bootstrap). See [ACKO multi-cluster docs](https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/blob/main/docs/multi-cluster-keycloak.md).
+> The `e2e_pytest/` scenario suite includes a **multi-cluster + Keycloak OIDC** scenario. It covers the common-cluster web application, the dev/prod operator-cluster API, and the bitnami/keycloak realm bootstrap. See the [ACKO multi-cluster docs](https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/blob/main/docs/multi-cluster-keycloak.md).
 
 ## License
 

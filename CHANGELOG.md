@@ -11,22 +11,22 @@ Per-release notes are also auto-published to [GitHub Releases](https://github.co
 
 ### Changed
 
-- `aerospike-py-api` skill — documented the new `.result_code: int` attribute on Aerospike exceptions (server errors carry the real wire code, e.g. `FailForbidden`=22; client-side errors carry the `-1` `CLIENT_SIDE_RESULT_CODE` sentinel) as the structured way to branch on failures instead of parsing message strings (aerospike-py ADR-0027, PR #413).
-- Plugin manifest (`plugin.json`) and `marketplace.json` descriptions rewritten to cover all 9 current skills.
-- CI workflow prompts (`issue-planner`, `agent-implement`, `pr-reviewer`) updated from the obsolete "5 skills + 1 agent" structure to the current 9-skill layout.
-- `README.md` — added the missing `acko-e2e-test` and `bug-reporter` skills to the Skills table.
+- The `aerospike-py-api` skill now documents the `.result_code: int` attribute on Aerospike exceptions. Server errors carry the actual wire code, such as `FailForbidden`=22, while client-side errors use the `-1` `CLIENT_SIDE_RESULT_CODE` sentinel. Applications can use this structured value instead of parsing error messages (aerospike-py ADR-0027, PR #413).
+- The plugin manifest (`plugin.json`) and `marketplace.json` descriptions now cover all nine current skills.
+- The CI workflow prompts (`issue-planner`, `agent-implement`, `pr-reviewer`) now reflect the current nine-skill layout instead of the obsolete "5 skills + 1 agent" structure.
+- The Skills table in `README.md` now includes the previously missing `acko-e2e-test` and `bug-reporter` skills.
 
 ### Fixed
 
-- Skill command examples — corrected stale `ackoctl` verbs (`k8s pod logs` → `k8s cluster logs`, `udf register` → `udf upload`) and CE 7.x namespace parameters (`stop-writes-pct` → `stop-writes-sys-memory-pct`, `high-water-*-pct` → `evict-used-pct`) across `acko-debugging`, `ackoctl`, `acko-operations`, and `README.md`.
-- `ackoctl k8s events list` → `ackoctl k8s cluster events` — the events verb lives under the `k8s cluster` noun in the actual CLI (`ackoctl/SKILL.md`, `acko-debugging/SKILL.md`, `README.md`).
-- `ackoctl/reference/commands.md` — corrected `cluster configure-namespace` flags from `--namespace`/`--set` to the real `--name`/`--param` (repeatable), matching `ackoctl/SKILL.md` and the CLI.
-- `README.md` — Aerospike-py prerequisite bumped from "Python 3.9+" to "Python 3.10+" (aerospike-py declares `requires-python = ">=3.10"`).
-- `acko-e2e-test` and `acko-debugging` skill `description` frontmatter trimmed below the 1024-character limit so the skills load without truncation.
+- Corrected stale `ackoctl` verbs (`k8s pod logs` → `k8s cluster logs`, `udf register` → `udf upload`) and CE 7.x namespace parameters (`stop-writes-pct` → `stop-writes-sys-memory-pct`, `high-water-*-pct` → `evict-used-pct`) in command examples across `acko-debugging`, `ackoctl`, `acko-operations`, and `README.md`.
+- Replaced `ackoctl k8s events list` with `ackoctl k8s cluster events`, matching the actual location of the events verb under the `k8s cluster` noun (`ackoctl/SKILL.md`, `acko-debugging/SKILL.md`, `README.md`).
+- Corrected the `cluster configure-namespace` flags in `ackoctl/reference/commands.md` from `--namespace`/`--set` to the repeatable `--name`/`--param` flags used by `ackoctl/SKILL.md` and the CLI.
+- Updated the aerospike-py prerequisite in `README.md` from "Python 3.9+" to "Python 3.10+", matching the package declaration `requires-python = ">=3.10"`.
+- Shortened the `description` frontmatter for the `acko-e2e-test` and `acko-debugging` skills to keep it below the 1024-character loading limit.
 
 ### Removed
 
-- Deleted the dead `.mcp.json` placeholder left over from the retired `acm-mcp-init` MCP integration.
+- Deleted the unused `.mcp.json` placeholder left by the retired `acm-mcp-init` MCP integration.
 
 ## [1.4.4] - 2026-05-17
 
@@ -42,13 +42,13 @@ Per-release notes are also auto-published to [GitHub Releases](https://github.co
 
 ### CI/CD
 
-- Daily Release — shifted the scheduled run to KST 07:00 (#31).
+- Daily Release now runs at KST 07:00 (#31).
 
 ## [1.4.2] - 2026-05-13
 
 ### Changed
 
-- Reverted an erroneous 2.0.0 release — retiring the MCP HTTP server in favour of `ackoctl` is a feature swap, not a breaking major bump (#30).
+- Reverted the erroneous 2.0.0 release because replacing the MCP HTTP server with `ackoctl` is a feature swap, not a breaking major change (#30).
 
 ## [1.4.1] - 2026-05-13
 
@@ -89,7 +89,7 @@ Per-release notes are also auto-published to [GitHub Releases](https://github.co
 
 ### CI/CD
 
-- Daily Release — restricted automatic version bumps to minor (`feat`) and patch; major bumps are now manual (#18).
+- Daily Release now limits automatic version bumps to minor (`feat`) and patch releases; major bumps remain manual (#18).
 
 ## [1.2.1] - 2026-05-06
 
@@ -103,13 +103,13 @@ Per-release notes are also auto-published to [GitHub Releases](https://github.co
 ### Changed
 
 - **Skills**:
-  - `acko-e2e-test` — Hybrid pytest rewrite: Python for assertions, bash for CLI orchestration. Tightens release-verification scenarios and reduces flakiness on the CLI orchestration boundary (PR #10).
+  - `acko-e2e-test` — rewritten as a hybrid pytest suite, using Python for assertions and bash for CLI orchestration. The change tightens release-verification scenarios and reduces flakiness at the CLI orchestration boundary (PR #10).
 - **Skill updates**:
   - `aerospike-py-api` — added a PK regex filter scan guide and `REGEX_*` constants (PR #11); cross-linked the Secondary Index alternative from the PK regex notes (PR #14).
 
 ### CI/CD
 
-- **Daily Release workflow**: New `daily-release.yml` GitHub Actions workflow that auto-detects unreleased commits, computes the next semver from Conventional Commits, and publishes a GitHub release with Claude-generated notes. Mirrors the pattern already used by `aerospike-py` and `aerospike-cluster-manager` so all four ecosystem repos share the same release cadence.
+- **Daily Release workflow**: Added the `daily-release.yml` GitHub Actions workflow. It detects unreleased commits, calculates the next semver version from Conventional Commits, and publishes a GitHub release with Claude-generated notes. The workflow follows the pattern used by `aerospike-py` and `aerospike-cluster-manager`, giving all four ecosystem repositories the same release cadence.
 
 ## [1.1.0] - 2026-05-02
 
@@ -123,11 +123,11 @@ Per-release notes are also auto-published to [GitHub Releases](https://github.co
 
 ### Changed
 
-- Plugin manifest bumped to `1.1.0` to invalidate stale local plugin caches and surface the new `acko-e2e-test` skill.
+- Bumped the plugin manifest to `1.1.0` so stale local plugin caches are invalidated and the new `acko-e2e-test` skill becomes visible.
 
 ## [1.0.0] - 2026-04-30
 
-Initial public release. Plugin manifest version is `1.0.0` (see `.claude-plugin/plugin.json`).
+Initial public release. The plugin manifest version is `1.0.0` (see `.claude-plugin/plugin.json`).
 
 ### Added
 
