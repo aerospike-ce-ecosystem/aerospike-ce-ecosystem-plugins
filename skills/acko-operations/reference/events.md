@@ -9,6 +9,7 @@ Catalog of Kubernetes events emitted by the ACKO operator. Count grows over rele
 | Event Reason | Type | When Emitted |
 |---|---|---|
 | `RollingRestartStarted` | Normal | Rolling restart batch begins |
+| `RollingRestartDeferred` | Warning | Restart batch deferred because data migration is in flight (mirrors `ScaleDownDeferred`) |
 | `RollingRestartCompleted` | Normal | All target pods have been restarted |
 | `RestartFailed` | Warning | A pod restart failed |
 | `PodWarmRestarted` | Normal | SIGUSR1 warm restart completed for a pod |
