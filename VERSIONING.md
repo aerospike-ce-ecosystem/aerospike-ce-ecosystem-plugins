@@ -1,7 +1,6 @@
 # Versioning Policy
 
-The `aerospike-ce-ecosystem` Claude Code plugin uses [Semantic Versioning 2.0.0](https://semver.org/).
-Given a version `MAJOR.MINOR.PATCH`:
+The `aerospike-ce-ecosystem` Claude Code plugin follows [Semantic Versioning 2.0.0](https://semver.org/). For a version in the form `MAJOR.MINOR.PATCH`:
 
 - **MAJOR** — incompatible skill/agent contract changes, removal of skills, or changes that require user action.
 - **MINOR** — new skills/agents/commands, expanded coverage, or backwards-compatible content updates.
@@ -11,8 +10,7 @@ The plugin version is recorded in `.claude-plugin/plugin.json` and tagged in git
 
 ## Compatibility Matrix
 
-Each plugin release is validated against specific upstream versions of the projects it documents.
-A plugin version is expected to work with the components below; older or newer combinations are best-effort.
+Each plugin release is validated against specific versions of the upstream projects it documents. The plugin is expected to work with the combinations below; other combinations are best-effort.
 
 | Plugin Version | ACKO | aerospike-py | ackoctl | Aerospike CE Server |
 |----------------|------|--------------|---------|---------------------|
@@ -21,21 +19,22 @@ A plugin version is expected to work with the components below; older or newer c
 | 1.2.0          | v1.2.1 | 0.10.0 | n/a (ACM MCP) | 8.1.x (8.x supported) |
 | Unreleased     | tracks ACKO `main` | tracks aerospike-py `main` | tracks ackoctl `main` | 8.x |
 
-Sources for the 1.0.0 row:
+The 1.0.0 row is based on these sources:
+
 - ACKO: latest git tag in `aerospike-ce-kubernetes-operator` (`v1.0.0`); Helm chart `charts/aerospike-ce-kubernetes-operator/Chart.yaml` `version: 0.2.0`.
 - aerospike-py: latest git tag in `aerospike-py` (`v0.7.1`).
 - Aerospike CE: skills target CE 8.1 (`acko-config-reference`, `acko-deploy`); 8.x line broadly supported.
 
 ## Deprecation Policy
 
-- **Minor versions warn.** When a skill is scheduled for removal it is marked deprecated in its frontmatter `description` and in CHANGELOG `Deprecated`. The skill keeps working through the remainder of the current major.
-- **Major versions remove.** Deprecated skills/agents/commands are deleted in the next major bump. Renames are handled the same way (old name deprecated for a major, removed at the next).
-- **CE feature flags.** Skills that depend on a specific Aerospike CE feature flag (e.g. an 8.x-only config key) are marked in the skill body with the minimum CE version required. If a future CE release drops that feature, the skill is deprecated in the next minor and removed in the next major.
-- **Upstream breaks.** A breaking change in ACKO or `aerospike-py` (e.g. CRD `apiVersion` bump, `aerospike-py` API rename) triggers a major plugin release; the matrix row above is the contract for what each plugin version targets.
+- **Minor versions warn.** When a skill is scheduled for removal, its frontmatter `description` and the `Deprecated` section of the CHANGELOG mark it as deprecated. The skill continues to work for the rest of the current major version.
+- **Major versions remove.** The next major release removes deprecated skills, agents, and commands. Renames follow the same process: the old name remains deprecated for the current major version and is removed in the next one.
+- **CE feature flags.** A skill that depends on a specific Aerospike CE feature flag, such as an 8.x-only configuration key, states the minimum required CE version in its body. If a future CE release removes that feature, the skill is deprecated in the next minor release and removed in the next major release.
+- **Upstream breaks.** A breaking change in ACKO or `aerospike-py`, such as a CRD `apiVersion` bump or an `aerospike-py` API rename, triggers a major plugin release. Each compatibility-matrix row defines the upstream versions targeted by that plugin release.
 
 ## Releasing
 
-1. Update `.claude-plugin/plugin.json` version.
+1. Update the version in `.claude-plugin/plugin.json`.
 2. Move `Unreleased` entries into a new `X.Y.Z` section in `CHANGELOG.md`.
 3. Add a new row to the compatibility matrix above.
 4. Tag `vX.Y.Z` and push.
