@@ -140,6 +140,9 @@ aerospike_py.set_log_level(aerospike_py.LOG_LEVEL_DEBUG)   # OFF=-1, ERR=0, WARN
 aerospike_py.dropped_log_count()                            # back-pressure counter for slow sinks
 ```
 
+- `set_log_level` validates its argument — a value that is not one of the `LOG_LEVEL_*` constants raises `ValueError` (it is not silently forwarded).
+- Rust `TRACE` records land at Python logging level 5 (below `DEBUG`=10); the name `"TRACE"` is registered via `logging.addLevelName` at import, so records render as `TRACE` rather than `Level 5`.
+
 Logger names: `aerospike_core::cluster`, `aerospike_core::batch`, `aerospike_core::command`, `aerospike_py`.
 
 ---

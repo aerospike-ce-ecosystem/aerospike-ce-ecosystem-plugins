@@ -15,8 +15,8 @@ Complete field reference for the AerospikeCluster Custom Resource.
 | `spec.rollingUpdateBatchSize` | int/string | No | Pods to restart per batch (default: 1, or "25%") |
 | `spec.disablePDB` | bool | No | Set `true` to skip PodDisruptionBudget creation |
 | `spec.maxUnavailable` | int/string | No | PDB maxUnavailable value (default: 1) |
-| `spec.templateRef.name` | string | No | Reference an AerospikeClusterTemplate |
-| `spec.overrides` | object | No | Override template fields (only with templateRef) |
+| `spec.templateRef.name` | string | No | Reference an AerospikeClusterTemplate (immutable after creation) |
+| `spec.overrides` | object | No | Override template fields (only with templateRef; contents are CE-validated like the inline spec) |
 | `spec.operations` | list | No | On-demand operations (WarmRestart, PodRestart) |
 | `spec.k8sNodeBlockList` | list[string] | No | Block scheduling on specific K8s nodes (for node drain) |
 | `spec.seedsFinderServices.loadBalancer` | object | No | Create LoadBalancer Service for external seed discovery |
@@ -27,10 +27,10 @@ Complete field reference for the AerospikeCluster Custom Resource.
 |-------|------|-------------|
 | `service.cluster-name` | string | Cluster name (auto-set to CR name if omitted) |
 | `service.proto-fd-max` | int | Max client connections (auto-set to 15000 if omitted) |
-| `network.service.port` | int | Service port (auto-set to 3000 if omitted) |
+| `network.service.port` | int | Service port — fixed at 3000 (auto-set; webhook rejects any other value) |
 | `network.heartbeat.mode` | string | Must be `mesh` for CE on K8s (auto-set if omitted) |
-| `network.heartbeat.port` | int | Heartbeat port (auto-set to 3002 if omitted) |
-| `network.fabric.port` | int | Fabric port (auto-set to 3001 if omitted) |
+| `network.heartbeat.port` | int | Heartbeat port — fixed at 3002 (auto-set; webhook rejects any other value) |
+| `network.fabric.port` | int | Fabric port — fixed at 3001 (auto-set; webhook rejects any other value) |
 | `namespaces` | list | Namespace definitions (CE: max 2) |
 | `namespaces[].storage-engine.type` | string | `memory` or `device` |
 | `namespaces[].storage-engine.data-size` | int | Memory size in bytes (for type: memory) |

@@ -63,6 +63,8 @@ Credentials go to `.connect(user, password)`, not the config dict; `auth_mode` s
 client = aerospike.client({"hosts": [...], "auth_mode": aerospike.AUTH_EXTERNAL}).connect("ldap_user", "ldap_pass")
 ```
 
+`auth_mode` accepts only `AUTH_INTERNAL` (0), `AUTH_EXTERNAL` (1), or `AUTH_PKI` (2) — an unknown value is rejected client-side (no silent fallback to internal auth).
+
 ---
 
 ## Connection Patterns

@@ -33,6 +33,8 @@ spec:
     maxIgnorablePods: 1           # Allow 1 stuck pod without blocking
 ```
 
+`maxIgnorablePods` semantics: an explicit `0` / `"0%"` means **ignore no unhealthy pods** (it is honored strictly, not bumped to 1); a non-zero percentage that rounds down to 0 still yields at least 1.
+
 ---
 
 ## 2. Rolling Update
@@ -74,7 +76,7 @@ The operator applies dynamic changes via 2-phase commit (April 2026+):
 |-------|----------|------------|
 | 1. Validate-all | Probe every pod with the proposed change (syntax + node responsiveness) | Abort whole update; no pod is mutated |
 | 2. Apply sequentially | Per-pod 30 s timeout (independent of reconciliation timeout) | Run LIFO rollback across already-updated pods |
-| 3. Rollback | Revert each updated pod in reverse order, per-pod 30 s timeout | Set `phase=ConfigDegraded`; cold restart on next reconcile |
+| 3. Rollback | Revert each updated pod in reverse order, per-pod 30 s timeout | Set `phase=ConfigDegraded`; reconciliation halts until manual intervention |
 
 This makes a dynamic config rollout effectively atomic from the user's perspective.
 
@@ -97,7 +99,9 @@ Top-level statuses:
 
 **Removing** a config key (not just changing it) always forces a rolling restart, even for an otherwise-dynamic param — "revert to server default" cannot be expressed as `set-config`.
 
-If phase 2 apply AND rollback both fail, the cluster enters `phase=ConfigDegraded` and `ConditionDynamicConfigDegraded=True`. The operator will cold-restart on the next reconcile to converge to spec — do not manually toggle `enableDynamicConfigUpdate` during this window.
+`namespace.replication-factor` (and legacy `memory-size`) are **never** applied dynamically — changing them triggers a synchronized cold restart even with `enableDynamicConfigUpdate: true` (a live `set-config` push would risk replica drift).
+
+If phase 2 apply AND rollback both fail, the cluster enters `phase=ConfigDegraded` and `ConditionDynamicConfigDegraded=True`. Reconciliation then **halts** — the operator skips every reconcile with a `ConfigDegradedSkip` Warning (requeue ~60s) until you intervene: revert the offending value in the spec, then cold-restart the pods / reset the phase. Do not toggle `enableDynamicConfigUpdate` or re-apply the change during this window.
 
 Example status snapshot of a partial rollback:
 
@@ -124,11 +128,15 @@ spec:
     rollingUpdateBatchSize: "50%"       # Per-rack override
 ```
 
+### What triggers a rolling (cold) restart
+
+Besides `image` and static `aerospikeConfig` changes, editing `spec.podService` or `spec.aerospikeNetworkPolicy` also rolls pods — those fields are part of the pod-spec hash the operator compares per pod.
+
 ---
 
 ## 3. On-Demand Restart
 
-Only one operation at a time. Remove from spec after completion. Batches gate on the same readiness-gate / migration guard as rolling restarts (a batch may pause until pods rejoin or migrations drain). The op goes to `status.operation.phase=Error` (not silent Completed) on an unknown `kind` or when `podList` names no existing pod.
+Only one operation at a time. Remove from spec after completion. Batches gate on the same readiness-gate / migration guard as rolling restarts (a batch may pause until pods rejoin or migrations drain) and honor `rackConfig.rollingUpdateBatchSize` with the same precedence as rolling restarts. The op goes to `status.operation.phase=Error` (not silent Completed) on an unknown `kind` or when `podList` names no existing pod.
 
 ### WarmRestart (SIGUSR1)
 
@@ -157,6 +165,8 @@ spec:
 kubectl get asc <name> -o jsonpath='{.status.operationStatus}' | jq .
 kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"operations":null}}'
 ```
+
+Clearing `spec.operations` also unblocks a stuck-`InProgress` operation. Via aerospike-cluster-manager API: `DELETE /api/k8s/clusters/{namespace}/{name}/operations`.
 
 ---
 
@@ -300,8 +310,10 @@ kubectl get asc <name> -o jsonpath='{.status.conditions[?(@.type=="ReconcileHeal
 Watching the breaker:
 
 ```promql
-acko_circuit_breaker_active{cluster="<name>"} == 1
+acko_circuit_breaker_active{name="<name>"} == 1
 ```
+
+Transient-failure backoff is exponential and capped at 5 minutes.
 
 ### WaitingForMigration
 
@@ -336,6 +348,23 @@ kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods}' | jq 'to_entries[] |
 
 The operator defers destructive actions (scale-down, pod removal) until `migrationStatus.inProgress` is `false`.
 
+Parsing is conservative: a node whose `migrate_partitions_remaining` cannot be read or parsed is treated as **still migrating** (destructive actions stay deferred), and an empty stat sweep preserves the previous `migrationStatus` instead of fabricating "0 partitions remaining".
+
+---
+
+## 11b. Clone Cluster
+
+Create a copy of an existing cluster with a new name (via aerospike-cluster-manager API or manually):
+
+```bash
+# Manual clone: export existing CR, strip status/operations, change name
+kubectl get asc <source> -n <ns> -o json | \
+  jq 'del(.status, .metadata.resourceVersion, .metadata.uid, .metadata.creationTimestamp, .spec.operations, .spec.paused) | .metadata.name = "<new-name>"' | \
+  kubectl apply -f -
+```
+
+The clone preserves the full spec (aerospikeConfig, storage, monitoring, ACL) but strips `operations` and `paused` fields.
+
 ---
 
 ## 12. Cluster Deletion
@@ -349,3 +378,26 @@ Sequence:
 2. `cascadeDelete: true`: PVCs automatically deleted
 3. `cascadeDelete: false`: PVCs retained; manual cleanup: `kubectl delete pvc -n <ns> -l aerospike.io/cr-name=<name>`
 4. `FinalizerRemoved` event -> CR deleted
+
+---
+
+## 13. OpenTelemetry Observability (operator)
+
+The operator can export its **reconcile traces, metrics, and logs** to an OTLP/gRPC collector — off by default. Enable it on a running cluster with a Helm upgrade (no CR change):
+
+```bash
+helm upgrade acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  -n aerospike-operator --reuse-values \
+  --set observability.otel.enabled=true \
+  --set observability.otel.endpoint=otel-collector.observability.svc.cluster.local:4317
+```
+
+The Deployment rolls; the new pod logs `OpenTelemetry export enabled`. Confirm export is flowing — a blocked egress instead logs `missing address` / `context deadline exceeded`:
+
+```bash
+kubectl -n aerospike-operator logs -l control-plane=controller-manager --tail=50 | grep -iE 'otel|export'
+```
+
+The collector then receives reconcile spans (`Reconcile` → `reconcileCluster` → `reconcileRacks`), the `acko_*` + controller-runtime metrics, and operator logs. Disable again with `--set observability.otel.enabled=false`.
+
+Config rules — `enabled` + `endpoint` both required, OTLP/gRPC endpoint scheme, the auto-added NetworkPolicy egress (`observability.otel.collectorPort`) — are covered in **acko-deploy**.

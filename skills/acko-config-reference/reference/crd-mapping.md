@@ -16,7 +16,7 @@ The operator converts CRD YAML fields to aerospike.conf syntax automatically.
 
 ## Operator Auto-Processing
 
-The ACKO operator automatically sets these values when they are omitted from the CR. You do not need to specify them unless you want non-default values.
+The ACKO operator automatically sets these values when they are omitted from the CR. The three `network.*.port` values are **fixed** — the webhook rejects any other value (container ports, probes, Services and NetworkPolicies assume them); omit them or set them to exactly these defaults.
 
 | Field | Auto-Set Value |
 |-------|---------------|

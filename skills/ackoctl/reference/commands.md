@@ -23,7 +23,7 @@ Read-only. **Run `guide get` before any mutating command** — data-plane before
 
 ## `connection` — cluster-manager connection profiles
 
-`--host` repeatable; `--port` 1..65535. `--color` must be `#RRGGBB` hex. Duplicate `--label` keys rejected. `--password`/`--password-stdin` mutually exclusive (both optional).
+`--host` repeatable; `--port` 1..65535. `--color` must be `#RRGGBB` hex. Duplicate `--label` keys rejected. `--password`/`--password-stdin` mutually exclusive (both optional; prefer `--password-stdin`). IDs are stable UUIDs — store them in scripts; names can change. `connection delete` cascades attached notes.
 
 | Verb | One-liner |
 |------|-----------|
@@ -41,7 +41,11 @@ Read-only. **Run `guide get` before any mutating command** — data-plane before
 | `cluster info CONN_ID` | Nodes + namespaces + sets summary (raw map; use `-o json/yaml` for full payload). |
 | `cluster configure-namespace CONN_ID --name NS --param KEY=VAL [--param …]` | Patch dynamic-config knobs (`--param` repeatable, ≥1 required, duplicate keys rejected, `name` reserved). |
 
+`configure-namespace` issues `asinfo set-config` — only **runtime-mutable** knobs apply; CE cannot create namespaces at runtime (they live in `aerospike.conf`, managed by ACKO).
+
 ## `set` — set inspection + destructive ops
+
+`set list` is derived from cluster info (no dedicated `/sets` endpoint).
 
 | Verb | One-liner |
 |------|-----------|
@@ -49,6 +53,8 @@ Read-only. **Run `guide get` before any mutating command** — data-plane before
 | `set truncate CONN_ID --namespace NS --set S [--before-lut N] --yes` | Truncate a set (destructive). `--before-lut` (optional ns cutoff) must be positive; omit for full wipe. |
 
 ## `record` — CRUD on Aerospike records
+
+`--pk-type` pins the particle type (`auto|string|int|bytes`); `auto` retries the alternate type on `NOT_FOUND`. `--ttl`: `-1` (never expire), `0` (namespace default), or positive seconds.
 
 | Verb | One-liner |
 |------|-----------|
@@ -75,7 +81,7 @@ Read-only. **Run `guide get` before any mutating command** — data-plane before
 
 ## `note` — operator annotations on sets and records
 
-`--note` must be non-empty (whitespace-only rejected), up to 8 KB.
+`--note` must be non-empty (whitespace-only rejected), up to 8 KB. Notes live in cluster-manager's metaDB (not Aerospike), are scoped per connection, and cascade-delete with it.
 
 | Verb | One-liner |
 |------|-----------|
@@ -105,6 +111,8 @@ Read-only. **Run `guide get` before any mutating command** — data-plane before
 | Verb | One-liner |
 |------|-----------|
 | `info CONN_ID --command CMD [--command CMD …] [--node NODE] [--allow-write]` | Run asinfo verbs (`--command` non-empty, repeatable); fan-out when `--node` omitted; `--allow-write` bypasses the read-only whitelist. |
+
+Read verbs run against the cluster-manager read-only whitelist by default; mutation verbs (`set-config:`, `recluster:`, …) require `--allow-write`. Always mediated by the workspace ACL.
 
 ## `admin` — Aerospike Enterprise user + role management
 

@@ -42,8 +42,9 @@ Catalog of Kubernetes events emitted by the ACKO operator. Count grows over rele
 | `DynamicConfigValidationFailed` | Warning | Phase 1 (validate-all) rejected the change on at least one pod; whole update aborted before any pod is mutated |
 | `DynamicConfigRollbackTriggered` | Warning | Phase 2 apply failed on a pod; LIFO rollback started across already-updated pods |
 | `DynamicConfigRollbackFailed` | Warning | Rollback itself failed; cluster transitioning to `phase=ConfigDegraded` |
-| `DynamicConfigDegraded` | Warning | `ConditionDynamicConfigDegraded=True` set; cold restart will be attempted on next reconcile |
-| `DynamicConfigRecovered` | Normal | `ConfigDegraded` resolved (cold restart converged to spec) |
+| `DynamicConfigDegraded` | Warning | `ConditionDynamicConfigDegraded=True` set; reconciliation halts until manual intervention |
+| `ConfigDegradedSkip` | Warning | Reconcile skipped because the cluster is in `phase=ConfigDegraded` (message: `"Reconcile skipped due to ConfigDegraded phase"`; repeats every ~60s until resolved) |
+| `DynamicConfigRecovered` | Normal | `ConfigDegraded` resolved (config reverted / pods converged back to spec) |
 
 ---
 

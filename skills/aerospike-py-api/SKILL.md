@@ -3,243 +3,104 @@ name: aerospike-py-api
 description: "MUST USE when writing any Python code with aerospike-py or aerospike_py. Rust/PyO3 library with UNCONVENTIONAL patterns — exceptions are importable both from the top-level module (aerospike_py.RecordNotFound) and from aerospike_py.exception (with TimeoutError/IndexError being deprecated aliases there), return types are NamedTuples (record.bins, record.meta.gen, NOT tuple unpacking), batch_read returns a LazyBatchRecords handle (.to_dict() for dict[UserKey, AerospikeRecord], .to_list() for request-order positional list[bins | None] collision-safe across sets, .to_numpy(np.dtype([...])) for a zero-copy structured array; handle.items()/handle[\"k\"] still work via Mapping backward-compat; the legacy _dtype= kwarg is removed), policies use module-level constants (aerospike_py.POLICY_EXISTS_CREATE_ONLY). Without this skill, code uses wrong import paths/return types and misses expression filters (exp), batch_write in_doubt retry, CDT list/map/bit/hll, ping(), backpressure, Prometheus metrics, OpenTelemetry, NumPy, and admin APIs. Triggers on: aerospike-py, aerospike_py, AsyncClient, client.ping(), batch_write, Python + Aerospike, put/get/query/batch with Aerospike."
 ---
 
-## Installation
+## Install & Import
 
-```bash
-pip install aerospike-py         # core
-pip install aerospike-py[numpy]  # NumPy batch integration
-pip install aerospike-py[otel]   # OpenTelemetry context propagation
-```
+`pip install aerospike-py` (extras: `[numpy]`, `[otel]`). Wheels include 3.14 and 3.14t (free-threaded, `gil_used=false` — the GIL stays disabled on 3.14t, so threaded workloads scale).
 
-Wheels include Python 3.14 and 3.14t (free-threaded, `gil_used=false` — importing on 3.14t keeps the GIL disabled, so threaded workloads scale).
-
-**Import note**: Rust/PyO3 extension. All exceptions are importable from `aerospike_py` directly (preferred) or from `aerospike_py.exception` (e.g., `from aerospike_py.exception import RecordNotFound`). Constants live on `aerospike_py` module directly (e.g., `aerospike_py.POLICY_EXISTS_CREATE_ONLY`). Return types are NamedTuples — use `record.bins`, `record.meta.gen`. Type stubs: `src/aerospike_py/__init__.pyi`
+**Rust/PyO3 extension — unconventional patterns**: exceptions import from `aerospike_py` directly (preferred) or `aerospike_py.exception`; constants live on the module (`aerospike_py.POLICY_EXISTS_CREATE_ONLY`); return types are NamedTuples — `record.bins`, `record.meta.gen`, `record.meta.ttl` (tuple unpacking also works). Shapes: `Record(key, meta, bins)`, `ExistsResult(key, meta)`, `OperateOrderedResult(key, meta, ordered_bins)` — `./reference/types.md`. Stubs: `src/aerospike_py/__init__.pyi`
 
 ## 1. Client Setup
 
 ```python
 import aerospike_py; from aerospike_py import AsyncClient
-
-client = aerospike_py.client({"hosts": [("127.0.0.1", 18710)]}).connect()
-client = aerospike_py.client(config).connect("admin", "admin")  # with auth
-with aerospike_py.client(config).connect() as client: ...       # context manager
-async with AsyncClient(config) as client: await client.connect() # async
+client = aerospike_py.client({"hosts": [("127.0.0.1", 18710)]}).connect()   # sync (builder)
+client = aerospike_py.client(config).connect("admin", "admin")              # with auth
+async with AsyncClient(config) as client: await client.connect()            # async
 ```
 
-Config: `hosts` (required), `cluster_name`, `auth_mode`, `user`, `password`, `timeout`, `idle_timeout`, `max_conns_per_node`, `tend_interval`, `use_services_alternate`, `max_concurrent_operations` (backpressure), `operation_queue_timeout_ms`. Detail: `./reference/client-config.md`
+Config keys (`hosts` required; `max_concurrent_operations` = backpressure; `cluster_name`, `auth_mode`, timeouts, pool sizing, …): `./reference/client-config.md`
 
-## 2. Return Types
-
-NamedTuples from `aerospike_py.types` -- use attribute access, not index:
-
-```python
-record = client.get(key)
-record.bins["name"], record.meta.gen, record.meta.ttl  # attribute access
-_, meta, bins = client.get(key)                         # tuple unpacking also works
-# Record(key, meta, bins) | ExistsResult(key, meta) | OperateOrderedResult(key, meta, ordered_bins)
-```
-
-Detail: `./reference/types.md`
-
-## 3. CRUD
+## 2. CRUD
 
 ```python
 key = ("test", "demo", "user1")
-client.put(key, {"name": "Alice", "age": 30})
-client.put(key, {"score": 100}, meta={"ttl": 300})
+client.put(key, {"name": "Alice"}, meta={"ttl": 300})
 client.put(key, {"x": 1}, policy={"exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY})
 client.put(key, {"x": 1}, meta={"gen": 2}, policy={"gen": aerospike_py.POLICY_GEN_EQ})
-
-record = client.get(key)                          # Read -> Record
-record = client.select(key, ["name"])              # specific bins
-result = client.exists(key)                        # ExistsResult (meta=None if missing)
-client.remove(key)                                 # Delete
-client.touch(key, val=300)                         # Reset TTL
-client.append(key, "name", "_suffix"); client.prepend(key, "name", "prefix_")
-client.increment(key, "counter", 1); client.increment(key, "score", 0.5)
-client.remove_bin(key, ["temp_bin"])
+record = client.get(key)                    # -> Record; select(key, ["name"]) for bins subset
+result = client.exists(key)                 # ExistsResult (meta=None if missing)
+client.remove(key); client.touch(key, val=300); client.remove_bin(key, ["temp_bin"])
+client.append(key, "name", "_sfx"); client.increment(key, "counter", 1)  # offset int/float only
 ```
 
-> Async: add `await` to all I/O methods.
+> Async: add `await` to all I/O methods. Detail: `./reference/write.md` | `./reference/read.md`
 
-## 4. Error Handling
+## 3. Error Handling
 
-```python
-try:
-    record = client.get(key)
-except aerospike_py.RecordNotFound: ...
-except aerospike_py.BackpressureError: ...   # max_concurrent_operations exceeded
-except aerospike_py.AerospikeTimeoutError: ...
-except aerospike_py.AerospikeError as e: ...  # catch-all
-```
+Catch specifics (`RecordNotFound`, `BackpressureError` = `max_concurrent_operations` exceeded, `AerospikeTimeoutError`) before the `AerospikeError` catch-all. Hierarchy: `AerospikeError` > `ClientError(BackpressureError)`, `ClusterError`, `InvalidArgError`, `AerospikeTimeoutError`, `RecordError(RecordNotFound, RecordExistsError, RecordGenerationError, FilteredOut, ...)`, `ServerError(AerospikeIndexError, QueryError, AdminError, UDFError)`. `aerospike_py.exception.TimeoutError`/`IndexError` are **deprecated aliases** (DeprecationWarning). Result-code table + batch error mapping: `./reference/admin.md`
 
-Hierarchy: `AerospikeError` > `ClientError(BackpressureError)`, `ClusterError`, `AerospikeTimeoutError`, `RecordError(RecordNotFound, RecordExistsError, RecordGenerationError, FilteredOut, ...)`, `ServerError(AerospikeIndexError, QueryError, AdminError, UDFError)`
-
-`aerospike_py.exception.TimeoutError`/`IndexError` remain as **deprecated aliases** for `AerospikeTimeoutError`/`AerospikeIndexError` and emit a `DeprecationWarning` when accessed — prefer the canonical names in new code.
-
-Detail: `./reference/admin.md`
-
-## 5. Batch Operations
+## 4. Batch Operations
 
 ```python
-keys = [("test", "demo", f"user_{i}") for i in range(10)]
-
-# batch_read -> LazyBatchRecords (deferred-conversion handle, NOT a dict). Materialise
-# via .to_dict() / .to_list() (request-order list[bins|None], multi-set collision-safe) / .to_numpy(dtype), or use it dict-like (Mapping over cached to_dict()):
-lazy = client.batch_read(keys)                      # or batch_read(keys, bins=["name"])
-for user_key, bins in lazy.items(): ...             # dict-like; missing keys absent
-if "user_3" in lazy: print(lazy["user_3"]["name"])
-
-# batch_operate / batch_remove -> BatchWriteResult (NamedTuple, .batch_records)
+lazy = client.batch_read(keys)              # LazyBatchRecords handle, NOT a dict
+for user_key, bins in lazy.items(): ...     # dict-like Mapping; missing keys absent
+rows = lazy.to_list()                       # request-order list[bins|None], multi-set collision-safe
+arr  = lazy.to_numpy(np.dtype([...]))       # zero-copy structured array (GIL released; torch.from_numpy)
+# batch_operate/batch_remove/batch_write -> BatchWriteResult; iterate .batch_records, br.result != 0 = failed
 results = client.batch_operate(keys, [{"op": aerospike_py.OPERATOR_INCR, "bin": "views", "val": 1}])
-failed = [br for br in results.batch_records if br.result != 0]
+# batch_write(records, retry=0): per-record bins + optional {"ttl":..,"gen":..} meta;
+# br.in_doubt=True -> write MAY have applied; do NOT blindly retry non-idempotent ops
 ```
 
-NumPy: `batch_read(...).to_numpy(dtype)` → `NumpyBatchRecords` (zero-copy; GIL released during fill — pair with `torch.from_numpy(...)`). `dtype` must be a real `np.dtype` (no auto-promote). The `batch_read(..., _dtype=...)` kwarg is **removed**. The `as_dict()`/`merge_as_dict()` aliases are **removed** (use `to_dict()`/`merge_to_dict()`). Writes: `batch_write_numpy(data, ns, set, dtype, retry=3)`. Detail: `./reference/read.md` | `./reference/write.md`
+Legacy `_dtype=` kwarg and `as_dict()`/`merge_as_dict()` aliases are **removed**. NumPy writes: `batch_write_numpy(...)`. Detail: `./reference/read.md` | `./reference/write.md`
 
-## 5b. Batch Write
-
-Per-record bins (and optional per-record TTL/gen via `WriteMeta`). Different from `batch_operate` which applies same ops to all keys.
+## 5. Operate / CDT Operations
 
 ```python
-records = [
-    (("test", "demo", "u1"), {"name": "Alice", "age": 30}),
-    (("test", "demo", "u2"), {"name": "Bob",   "age": 25}, {"ttl": 3600}),
-    (("test", "demo", "u3"), {"name": "Carol", "age": 40}, {"ttl": 0, "gen": 5}),  # CAS via gen
-]
-result = client.batch_write(records, retry=0)  # BatchWriteResult
-for br in result.batch_records:
-    if br.result != 0:
-        if br.in_doubt:
-            ...  # write may have succeeded -- do NOT blindly retry non-idempotent ops
-        else:
-            ...  # safe to retry
+ops = [{"op": aerospike_py.OPERATOR_INCR, "bin": "c", "val": 1},   # val int/float else TypeError
+       {"op": aerospike_py.OPERATOR_READ, "bin": "c", "val": None}]
+record = client.operate(key, ops)
+result = client.operate_ordered(key, ops)   # order preserved in result.ordered_bins
+from aerospike_py import list_operations as lop, map_operations as mop   # also bit_/hll_operations
+client.operate(key, [lop.list_append("l", "v"), mop.map_get_by_key("m", "k", aerospike_py.MAP_RETURN_VALUE)])
 ```
 
-`BatchRecord.in_doubt: bool` is critical for idempotency decisions. Detail: `./reference/write.md`
+`return_type` is family-validated client-side (list ops → `LIST_RETURN_*`, map ops → `MAP_RETURN_*`; wrong family → `ValueError`); bit op flags are strict too. Operator codes + all CDT helpers: `./reference/write.md` | `./reference/constants.md`
 
-## 6. Operate / Operate Ordered
-
-Atomic multi-op on a single record. CDT ops (Section 7) can be mixed in.
-
-```python
-ops = [
-    {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},   # INCR val must be int/float -> else TypeError
-    {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
-]
-record = client.operate(key, ops)  # READ=1, WRITE=2, INCR=5, APPEND=9, PREPEND=10, TOUCH=11, DELETE=12
-result = client.operate_ordered(key, ops)  # preserves operation order in result.ordered_bins
-```
-
-## 7. CDT Operations
-
-Helper modules build `Operation` dicts for `operate()`/`batch_operate()`. `return_type` is family-validated client-side (list ops → `LIST_RETURN_*`, map ops → `MAP_RETURN_*`; wrong-family → `ValueError`).
-
-```python
-from aerospike_py import list_operations as lop, map_operations as mop
-from aerospike_py import bit_operations as bop, hll_operations as hop
-
-client.operate(key, [lop.list_append("mylist", "v"), lop.list_get("mylist", 0)])
-client.operate(key, [mop.map_get_by_key("mymap", "k1", aerospike_py.MAP_RETURN_VALUE)])
-client.operate(key, [bop.bit_count("flags", 0, 64)])          # bit_add action: FAIL/SATURATE/WRAP only
-client.operate(key, [hop.hll_add("visitors", ["u1"], 10), hop.hll_get_count("visitors")])
-```
-
-Detail: `./reference/write.md` | `./reference/constants.md`
-
-## 8. Query & Index
+## 6. Query & Index
 
 ```python
 from aerospike_py import predicates as p
-client.index_integer_create("test", "demo", "age", "age_idx")
-client.index_string_create("test", "demo", "name", "name_idx")
-
+client.index_integer_create("test", "demo", "age", "age_idx")   # IndexFoundError if name exists
 query = client.query("test", "demo")
 query.select("name", "age"); query.where(p.between("age", 20, 40))
 records = query.results()     # or query.foreach(callback)
 ```
 
-Predicates (validated client-side at query-build → `InvalidArgError`): `p.equals(bin, val)` (val int/str/bytes), `p.between(bin, min, max)` (integer bounds), `p.contains(bin, INDEX_TYPE_*, val)`. Empty bin names rejected.
+Predicates validated client-side at query-build (`InvalidArgError`): `p.equals`, `p.between` (integer bounds), `p.contains`. Scan API removed — use `Query` without `where`; `get_many`/`exists_many`/`select_many` removed — use `batch_read`/`batch_operate`. Detail: `./reference/read.md`
 
-> Scan API removed -- use `Query` (no `where` clause) for full-set scan. `get_many`/`exists_many`/`select_many` removed -- use `batch_read`/`batch_operate`.
+## 7. Expression Filters
 
-## 9. Expression Filters
-
-Server-side filtering (Aerospike 5.2+). No secondary index required. Policy key: `"filter_expression"`.
+Server-side filtering (Aerospike 5.2+), no secondary index required. Policy key `"filter_expression"` — works with get, put, batch_read, query.results, operate.
 
 ```python
-import aerospike_py
 from aerospike_py import exp
-
 expr = exp.and_(exp.gt(exp.int_bin("age"), exp.int_val(18)),
                 exp.eq(exp.string_bin("status"), exp.string_val("active")))
 record = client.get(key, policy={"filter_expression": expr})
-
-# Regex (use REGEX_* constants, not magic integers):
-exp.regex_compare(r"^u_", aerospike_py.REGEX_NONE, exp.string_bin("n"))
-
-# PK regex filter scan (Java client Exp.regexCompare(..., Exp.key(...)) equivalent).
-# Requires POLICY_KEY_SEND on writes; performs a full set scan with server-side
-# filtering — NOT a primary-index lookup.
-exp.regex_compare("^aaa.*", aerospike_py.REGEX_NONE, exp.key(exp.EXP_TYPE_STRING))
-
-# Also: exp.bin_exists("f"), exp.ttl()
-# Variable binding: exp.let_(exp.def_("x", exp.int_bin("a")), exp.gt(exp.var("x"), exp.int_val(10)))
-# Works with: get, put, batch_read, query.results, operate
+exp.regex_compare(r"^u_", aerospike_py.REGEX_NONE, exp.string_bin("n"))  # REGEX_* constants, not magic ints
 ```
 
-Detail: `./reference/read.md` · Constants: `./reference/constants.md` (Regex Flags)
+PK regex scan: `exp.regex_compare("^aaa.*", REGEX_NONE, exp.key(exp.EXP_TYPE_STRING))` — requires `POLICY_KEY_SEND` on writes; full set scan, NOT a PK-index lookup. Variable binding: `exp.let_(exp.def_("x", ...), body)` — `cond()`/`let_()` operand counts validated client-side (`InvalidArgError`). Detail: `./reference/read.md` · Regex flags: `./reference/constants.md`
 
-## 10. Admin & Infrastructure
+## 8. Admin, Info & Health
 
-```python
-# User management
-client.admin_create_user("user1", "pass", ["read-write"])
-client.admin_drop_user("user1")
+`client.admin_create_user("user1", "pass", ["read-write"])` (+ roles/privileges APIs) · `client.get_node_names()` (sync on BOTH clients — never awaitable) · `client.info_all("namespaces")` → `list[InfoNodeResult]` · `client.ping()` → bool, never raises (K8s readiness probes). Detail: `./reference/admin.md` | `./reference/health.md`
 
-# Cluster topology (sync call on both sync/async clients)
-nodes = client.get_node_names()  # list[str] — NOT awaitable, always sync
+## 9. Observability
 
-# Info
-results = client.info_all("namespaces")  # list[InfoNodeResult]
-response = client.info_random_node("build")  # str
-```
+`start_metrics_server(port=9464)` / `get_metrics()` / `set_metrics_enabled()` (Prometheus) · `init_tracing()` / `shutdown_tracing()` (OpenTelemetry, `OTEL_*` env vars) · `set_log_level(aerospike_py.LOG_LEVEL_DEBUG)` (OFF=-1..TRACE=4; invalid → ValueError). Detail: `./reference/observability.md`
 
-Detail: `./reference/admin.md`
+## 10. FastAPI / Policies
 
-## 10b. Health Check (`ping`)
-
-```python
-ok: bool = client.ping()              # sync: info("build") round-trip to a random node
-ok: bool = await async_client.ping()  # async equivalent
-```
-
-Never raises -- returns `False` on failure. Use for K8s readiness probes and load-balancer health checks. Detail: `./reference/health.md`
-
-## 11. Observability
-
-```python
-# Metrics (Prometheus text format)
-aerospike_py.start_metrics_server(port=9464)        # built-in HTTP /metrics endpoint
-aerospike_py.stop_metrics_server()
-aerospike_py.get_metrics()                           # current metrics as string
-aerospike_py.set_metrics_enabled(False)              # disable collection (~1ns atomic check overhead)
-aerospike_py.is_metrics_enabled()                    # bool
-
-# Tracing (OpenTelemetry; reads OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME)
-aerospike_py.init_tracing(); aerospike_py.shutdown_tracing()
-
-# Logging (Rust -> Python bridge)
-aerospike_py.set_log_level(aerospike_py.LOG_LEVEL_DEBUG)  # OFF=-1,ERR=0,WARN=1,INFO=2,DBG=3,TRACE=4
-aerospike_py.dropped_log_count()                     # int -- back-pressure counter (drops when sink slow)
-```
-
-Detail: `./reference/observability.md`
-
-## 12. FastAPI Integration
-
-For full FastAPI patterns (lifespan + Depends, exception → HTTP-status mapping including `BackpressureError → 503`, `client.ping()` readiness probe, batch endpoints, global handlers), use the dedicated **`aerospike-py-fastapi` skill**. It auto-triggers on FastAPI / REST API + Aerospike phrasing.
-
-## 13. Policy Reference
-
-Detail: `./reference/policies.md` | `./reference/constants.md`
+FastAPI patterns (lifespan + Depends, exception → HTTP-status mapping incl. `BackpressureError → 503`, `ping()` readiness, batch endpoints): use the dedicated **`aerospike-py-fastapi`** skill. Policy dicts and constants: `./reference/policies.md` | `./reference/constants.md`

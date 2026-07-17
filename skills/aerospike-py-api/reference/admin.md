@@ -204,8 +204,10 @@ nodes = async_client.get_node_names()    # async client — NOT awaitable, alway
 All exceptions import from `aerospike_py` directly (not `aerospike_py.exception.X`) and are identical for sync/async clients. Catch specifics before `AerospikeError` (catch-all). Key library-specific behaviors:
 
 - **`client.connect()` raises `ClusterError`** if no seed is reachable; the client auto-reconnects to surviving nodes after connect.
+- **Cancelled async connect is recoverable** — if `AsyncClient.connect()` is cancelled (e.g. `asyncio.wait_for` timeout), the client reverts to disconnected state; a subsequent `connect()`/`close()` works normally (no permanent "already connecting" wedge).
 - **Single-record reads raise** `RecordNotFound` (missing), `RecordGenerationError` (CAS conflict, `POLICY_GEN_EQ`), `RecordExistsError` (`CREATE_ONLY`), `AerospikeTimeoutError`.
 - **Batch ops do NOT raise** for per-record failures — check `br.result` (0 = OK) per record. `batch_read` missing keys are simply absent from the dict view; `batch_operate`/`batch_remove`/`batch_write` return `BatchWriteResult` — iterate `.batch_records`.
+- **Batch-level (transport) errors map by result code** through the same table as single-record ops — a batch that fails wholesale raises `RecordNotFound`/`AerospikeTimeoutError`/`RecordTooBig`/... rather than a generic `ClientError`; the message carries the failing index and doubt flag: `AEROSPIKE_ERR (<code>) [batch_index=<i>]: ... [in_doubt]`.
 
 ```python
 keys = [("test", "demo", f"id-{i}") for i in range(100)]
@@ -242,6 +244,8 @@ For `batch_write`, also inspect `br.in_doubt` before retrying (write may have ap
 | 210 | AEROSPIKE_ERR_QUERY_ABORTED | QueryAbortedError |
 
 Query timeouts also raise `AerospikeTimeoutError` (wire code **212**, no exported constant; `BatchRecord.result` carries 212).
+
+Every server result code maps to its real proto.h wire code (there is no `-1` catch-all), so `BatchRecord.result` and error messages always carry the actual code. All security/ACL/quota codes (53–83 range, e.g. `InvalidPassword`=62, `InvalidCredential`=65, `InvalidRole`=70, `QuotaExceeded`=83) raise **`AdminError`**; unlisted codes (e.g. index 202–206, query 211/213–215) raise the generic `ServerError` with the correct code in the message.
 
 ---
 

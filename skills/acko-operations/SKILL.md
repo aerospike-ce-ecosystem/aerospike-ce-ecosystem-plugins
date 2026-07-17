@@ -5,419 +5,97 @@ description: "MUST USE for any modification, debugging, or management of existin
 
 # ACKO Day-2 Operations & Troubleshooting
 
-Step-by-step procedures for managing and debugging Aerospike CE clusters on Kubernetes after initial deployment.
+Procedures for managing Aerospike CE clusters on Kubernetes after initial deployment. Every section here is the decision core; full kubectl detail per operation lives in [`./reference/operations.md`](./reference/operations.md) (section numbers below refer to it).
 
 ---
 
-## 1. Scale Up / Scale Down
-
-### Scale Up
-
-Increase `spec.size` to add nodes. CE maximum is 8.
+## 1. Scale Up / Scale Down (ops ref §1)
 
 ```bash
 kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"size":5}}'
 ```
 
-**Phase progression**: `ScalingUp` -> `Completed`
+- Up: `ScalingUp` → `Completed`. CE max is 8.
+- Down: `ScalingDown` → (`WaitingForMigration`) → `Completed`. The operator waits for data migration before removing pods and auto-retries after it drains. Verify with `kubectl get asc <name> -o jsonpath='{.status.migrationStatus}' | jq .`
+- Batching: `rackConfig.scaleDownBatchSize` (per rack), `rackConfig.maxIgnorablePods` (explicit `0`/`"0%"` = ignore none — honored strictly).
 
-**Verification**:
-```bash
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.phase}'
-kubectl get pods -n <ns> -l aerospike.io/cr-name=<name>
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.size}'
-```
-
-### Scale Down
-
-Decrease `spec.size` to remove nodes. The operator waits for data migration to complete before removing pods.
-
-```bash
-kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"size":3}}'
-```
-
-**Phase progression**: `ScalingDown` -> (`WaitingForMigration`) -> `Completed`
-
-If migration is in progress, scale-down is automatically deferred and retried after migration completes.
-
-**Verification**:
-```bash
-# Check migration status (cluster-level)
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.migrationStatus}' | jq .
-# Per-node migration partitions
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods}' | jq '.[].migratingPartitions'
-# Direct asinfo check
-kubectl exec -n <ns> <pod> -c aerospike-server -- asinfo -v 'statistics' | tr ';' '\n' | grep migrate
-```
-
-### Batch Size for Scaling
-
-Control how many pods are added/removed per batch per rack:
-
-```yaml
-spec:
-  rackConfig:
-    scaleDownBatchSize: "1"         # 1 pod per rack at a time
-    maxIgnorablePods: 1             # Allow 1 stuck pod without blocking
-```
-
----
-
-## 2. Image Upgrade (Rolling Restart)
-
-Change the Aerospike image to trigger a rolling restart of all pods.
+## 2. Image Upgrade / Rolling Restart (ops ref §2)
 
 ```bash
 kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"image":"aerospike:ce-8.1.1.1"}}'
 ```
 
-**Phase progression**: `RollingRestart` -> `Completed`
+`RollingRestart` → `Completed`. Batch control: `spec.rollingUpdateBatchSize` (int or `"25%"`), per-rack override `rackConfig.rollingUpdateBatchSize`. Besides image/static config, editing `spec.podService` or `spec.aerospikeNetworkPolicy` also rolls pods (pod-spec hash).
 
-**Control the batch size**:
-```yaml
-spec:
-  rollingUpdateBatchSize: 1           # Global: restart N pods per batch (integer or "25%")
-  rackConfig:
-    rollingUpdateBatchSize: "50%"     # Per-rack override
-```
+## 3. Dynamic Config Update — 2-Phase Commit (ops ref §2)
 
-**Verification**:
-```bash
-kubectl get asc <name> -n <ns> -w
-kubectl get pods -n <ns> -l aerospike.io/cr-name=<name> -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[0].image}{"\n"}{end}'
-```
+Set `spec.enableDynamicConfigUpdate: true`, then patch the config value. The operator runs a 2PC rollout: **validate-all** (any pod rejects → whole update aborted, nothing mutated) → **apply sequentially** (per-pod 30s timeout) → on apply failure, **LIFO rollback**. Net effect: all pods on the new value, all pods back on the old value, or `phase=ConfigDegraded`.
 
----
+- Verify: `kubectl get asc <name> -o jsonpath='{.status.pods[*].dynamicConfigChanges}' | jq` (`result`: `Applied`/`Failed`/`Pending`/`RolledBack`/`RollbackFailed`).
+- `Failed` = phase-1 rejection or apply-failed-rollback-succeeded → set `enableDynamicConfigUpdate: false` to force a rolling restart instead.
+- **Removing** a key always forces a rolling restart (revert-to-default is not expressible as `set-config`). `replication-factor` (and legacy `memory-size`) are never dynamic — they cold-restart.
+- **ConfigDegraded** (apply AND rollback both failed): reconciliation **halts** with `ConfigDegradedSkip` Warning events (~60s requeue) until you intervene — revert the offending value, then cold-restart pods / reset the phase. Do NOT toggle `enableDynamicConfigUpdate`. Full recovery flow: `acko-debugging` skill.
 
-## 3. Dynamic Config Update (No Restart, 2-Phase Commit)
+Common dynamic params: `proto-fd-max`, `max-record-size`, `stop-writes-sys-memory-pct`, `evict-used-pct`, `evict-tenths-pct`, `nsup-period`.
 
-Apply configuration changes without restarting pods. Only works for dynamically changeable parameters.
-
-### How the operator applies changes (2PC — April 2026)
-
-1. **Phase 1 — validate-all**: operator probes every pod with the proposed change. If ANY pod rejects validation (syntax, node unresponsive), the entire update is aborted and no pod is mutated.
-2. **Phase 2 — apply sequentially**: each pod is updated with a per-pod 30 s timeout (independent of the reconciliation timeout).
-3. **On apply failure**: a LIFO rollback runs across pods that were already updated. Each rollback also has the per-pod 30 s budget.
-4. **On rollback failure**: cluster transitions to `phase = ConfigDegraded`, `ConditionDynamicConfigDegraded=True` is set, and the operator attempts a cold restart on the next reconcile.
-
-This makes dynamic config rollouts atomic from the user's perspective: either every pod ends up on the new value, every pod ends up back on the old value, or you observe `ConfigDegraded` and the operator self-heals via cold restart.
-
-### Step 1: Enable Dynamic Config
-
-```yaml
-spec:
-  enableDynamicConfigUpdate: true
-```
-
-### Step 2: Patch the Config
-
-```bash
-kubectl patch asc <name> -n <ns> --type=merge \
-  -p '{"spec":{"aerospikeConfig":{"service":{"proto-fd-max":20000}}}}'
-```
-
-### Dynamically Changeable Parameters (Common)
-
-- `proto-fd-max`
-- `max-record-size`
-- `stop-writes-sys-memory-pct`
-- `evict-used-pct`
-- `evict-tenths-pct`
-- `nsup-period`
-
-### Step 3: Verify
-
-```bash
-# Per-pod, per-path tracking (April 2026)
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods[*].dynamicConfigChanges}' | jq
-
-# Aggregate per-pod status (legacy field, still populated)
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods}' | jq '.[].dynamicConfigStatus'
-```
-
-Per-change `result` enum (in `dynamicConfigChanges`): `Applied`, `Failed`, `Pending`, `RolledBack`, `RollbackFailed`.
-
-Top-level statuses:
-- `Applied`: Change applied successfully (no restart needed).
-- `Failed`: Phase 1 validation rejected the change on at least one pod, OR phase 2 apply failed and rollback succeeded. Set `enableDynamicConfigUpdate: false` to force a rolling restart.
-- `Pending`: Change is being applied.
-
-**Removing** a config key always forces a rolling restart (even for a dynamic param) — reverting to the server default cannot be expressed as `set-config`.
-
-### When apply AND rollback both fail
-
-You will see `phase = ConfigDegraded`. Do NOT try to "fix" it by toggling `enableDynamicConfigUpdate` — the operator will cold-restart the pods on the next reconcile to reach a consistent state. See the `acko-debugging` skill for the full recovery flow.
-
-### Static Config Change (Requires Restart)
-
-If `enableDynamicConfigUpdate` is `false` (default), any config change triggers a rolling restart:
-
-```bash
-kubectl patch asc <name> -n <ns> --type=merge \
-  -p '{"spec":{"aerospikeConfig":{"service":{"proto-fd-max":20000}}}}'
-```
-
-**Phase progression**: `RollingRestart` -> `Completed`
-
----
-
-## 4. Warm Restart / Cold Restart
-
-On-demand restart of pods. Only one operation at a time. Remove the operation from spec after completion.
-
-**Constraints (webhook-enforced):**
-- `kind` must be one of `WarmRestart` (SIGUSR1) or `PodRestart` (delete + recreate). No other values are accepted.
-- `id` must be 1–20 characters, unique-per-cluster.
-- The operations list cannot be modified (including changing `podList`) while an operation has `status.operation.phase = InProgress` — wait for it to complete (or fail) before queueing another.
-
-**Controller semantics:** the op terminates as `phase=Error` (not silent Completed) on an unknown `kind` or when `podList` names no existing pod. Batches gate on the readiness-gate / migration guard like rolling restarts, so a batch may legitimately pause.
-
-### Warm Restart (SIGUSR1)
-
-Sends SIGUSR1 to the Aerospike server process. Faster than a cold restart; preserves in-memory state where possible.
+## 4. Warm / Cold Restart — spec.operations (ops ref §3)
 
 ```yaml
 spec:
   operations:
-    - kind: WarmRestart
-      id: warm-001               # Unique ID, 1-20 characters
-      # podList: ["<cluster>-0-0"]  # Optional: specific pods only
+    - kind: WarmRestart        # SIGUSR1; or PodRestart (delete + recreate)
+      id: warm-001             # 1-20 chars, unique
+      # podList: ["<cluster>-0-0"]   # optional: specific pods
 ```
 
-### Cold Restart (Pod Delete + Recreate)
-
-Deletes and recreates the pod. Full process restart.
-
-```yaml
-spec:
-  operations:
-    - kind: PodRestart
-      id: cold-001
-      podList:                    # Optional: omit to restart all pods
-        - <cluster>-0-2
-```
-
-### Check Operation Status
-
-```bash
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.operationStatus}' | jq .
-```
-
-### Clean Up After Completion
-
-Remove the operation from spec after it completes:
+Webhook-enforced: `kind` ∈ {`WarmRestart`, `PodRestart`}; one operation at a time; the list (incl. `podList`) cannot change while one is `InProgress` (`"cannot change operations while operation \"ID\" is InProgress"`). Controller: op ends `phase=Error` on unknown kind / nonexistent pod; batches gate on the readiness/migration guard and honor `rackConfig.rollingUpdateBatchSize`. Check `status.operationStatus`; clean up (or unstick — §10) with:
 
 ```bash
 kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"operations":null}}'
 ```
 
-**Important**: Do not add a new operation while one is `InProgress`. The webhook rejects it with: `"cannot change operations while operation \"ID\" is InProgress"`.
+## 5. ACL Management (ops ref §4)
 
----
+- **Add user**: create the password Secret, then JSON-patch the user into `spec.aerospikeAccessControl.users` (`{"name":...,"roles":[...],"secretName":...}`).
+- **Change password**: update the Secret in place, then trigger a `WarmRestart` operation to pick it up.
+- Requirements: ≥1 user with BOTH `sys-admin` + `user-admin`; every user has `secretName` (Secret key `password`); unique user/role names. Privilege codes: `read`, `write`, `read-write`, `read-write-udf`, `sys-admin`, `user-admin`, `data-admin`, `truncate` — format `"<code>[.<namespace>[.<set>]]"` (admin codes are global-only).
 
-## 5. ACL Management
-
-### Add a New User
-
-```bash
-# Step 1: Create the K8s Secret for the new user's password
-kubectl create secret generic new-user-secret -n <ns> --from-literal=password=<pw>
-
-# Step 2: Add the user to the CR
-kubectl patch asc <name> -n <ns> --type=json \
-  -p '[{"op":"add","path":"/spec/aerospikeAccessControl/users/-","value":{"name":"new-user","roles":["reader"],"secretName":"new-user-secret"}}]'
-```
-
-### Change a User's Password
+## 6. Pause / Resume (ops ref §6)
 
 ```bash
-# Step 1: Update the K8s Secret
-kubectl create secret generic <secret-name> -n <ns> \
-  --from-literal=password=<new-pw> --dry-run=client -o yaml | kubectl apply -f -
-
-# Step 2: Trigger a warm restart to pick up the new password
-kubectl patch asc <name> -n <ns> --type=merge \
-  -p '{"spec":{"operations":[{"kind":"WarmRestart","id":"pw-change-001"}]}}'
+kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"paused":true}}'   # pause; null to resume
 ```
 
-### Add a Custom Role
+Resume clears stale `failedReconcileCount`/`lastReconcileError` — the recommended way to unstick a tripped circuit breaker after fixing a permanent error. Pause/breaker metrics: `./reference/metrics.md`.
 
-```bash
-kubectl patch asc <name> -n <ns> --type=json \
-  -p '[{"op":"add","path":"/spec/aerospikeAccessControl/roles/-","value":{"name":"app-reader","privileges":["read.testns"]}}]'
-```
+## 7. Delete Cluster (ops ref §12)
 
-### Valid Privilege Codes
+`kubectl delete asc <name> -n <ns>` → `ClusterDeletionStarted` → `Deleting` → `FinalizerRemoved`. `cascadeDelete: true` deletes PVCs; otherwise clean up with `kubectl delete pvc -n <ns> -l aerospike.io/cr-name=<name>`.
 
-`read`, `write`, `read-write`, `read-write-udf`, `sys-admin`, `user-admin`, `data-admin`, `truncate`
+## 8. Template Resync (ops ref §5)
 
-Privilege format: `"<code>"` or `"<code>.<namespace>"` or `"<code>.<namespace>.<set>"`
+`kubectl annotate asc <name> -n <ns> acko.io/resync-template=true` (auto-removed). Status: `.status.templateSnapshot.synced`; drift events: `reason=TemplateDrifted`.
 
-### ACL Requirements
+## 9. Clone Cluster (ops ref §11b)
 
-- At least one user must have BOTH `sys-admin` and `user-admin` roles.
-- Every user must have a `secretName` pointing to a K8s Secret with a `password` key.
-- User names and role names must be unique.
+Export the CR, strip `status`/identity metadata/`operations`/`paused`, rename, re-apply — exact `jq` recipe in ops ref §11b.
 
----
+## 10. Clear Stuck Operations (ops ref §3)
 
-## 6. Pause / Resume Reconciliation
+Patch `spec.operations` to `null` (§4 command). Via cluster-manager API: `DELETE /api/k8s/clusters/{namespace}/{name}/operations`.
 
-### Pause
+## 11-13. Network / PDB / Readiness Gate
 
-Stop the operator from reconciling this cluster. Existing pods continue running.
-
-```bash
-kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"paused":true}}'
-```
-
-**Phase**: `Paused`
-
-### Resume
-
-```bash
-kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"paused":null}}'
-```
-
-**Phase**: `Paused` -> `InProgress` -> `Completed`
-
-On resume, the operator clears stale `status.failedReconcileCount` and `status.lastReconcileError`. This is the recommended way to clear a stuck circuit breaker after fixing a permanent error (see the `acko-debugging` skill).
-
-### Pause/Resume Metrics
-
-| Metric | Type | Meaning |
-|--------|------|---------|
-| `acko_cluster_paused_timestamp_seconds` | gauge | Unix timestamp when pause began (`0` if not paused) |
-| `acko_cluster_paused_duration_seconds` | histogram | Distribution of pause-cycle durations (observed on resume) |
-| `acko_circuit_breaker_active` | gauge | `1` while the breaker is tripped, `0` otherwise |
-
-Pause duration is computed from the `ReconciliationPaused` condition's `lastTransitionTime`. Full metric catalog: `./reference/metrics.md`.
-
----
-
-## 7. Delete Cluster
-
-```bash
-kubectl delete asc <name> -n <ns>
-```
-
-**Deletion sequence**:
-1. `ClusterDeletionStarted` event -> Phase `Deleting`
-2. If `cascadeDelete: true` on volumes: PVCs are automatically deleted.
-3. If `cascadeDelete: false`: PVCs are retained. Clean up manually:
-   ```bash
-   kubectl delete pvc -n <ns> -l aerospike.io/cr-name=<name>
-   ```
-4. `FinalizerRemoved` event -> CR is deleted.
-
----
-
-## 8. Template Resync
-
-If you modified an `AerospikeClusterTemplate` and want existing clusters to pick up changes:
-
-```bash
-kubectl annotate asc <name> -n <ns> acko.io/resync-template=true
-```
-
-The annotation is automatically removed after resync completes.
-
-**Check sync status**:
-```bash
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.templateSnapshot.synced}'
-kubectl get events -n <ns> --field-selector reason=TemplateDrifted
-```
-
----
-
-## 9. Clone Cluster
-
-Create a copy of an existing cluster with a new name (via aerospike-cluster-manager API or manually):
-
-```bash
-# Manual clone: export existing CR, strip status/operations, change name
-kubectl get asc <source> -n <ns> -o json | \
-  jq 'del(.status, .metadata.resourceVersion, .metadata.uid, .metadata.creationTimestamp, .spec.operations, .spec.paused) | .metadata.name = "<new-name>"' | \
-  kubectl apply -f -
-```
-
-The clone preserves the full spec (aerospikeConfig, storage, monitoring, ACL) but strips `operations` and `paused` fields.
-
----
-
-## 10. Clear Stuck Operations
-
-If an operation is stuck in `InProgress` and blocking new operations:
-
-```bash
-# Remove operations from spec to unblock
-kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"operations":null}}'
-```
-
-Via aerospike-cluster-manager API: `DELETE /api/k8s/clusters/{namespace}/{name}/operations`
-
----
-
-## 11. Network Configuration
-
-Detail: `./reference/operations.md` (Section 8: Network)
-
----
-
-## 12. PDB and Maintenance
-
-Detail: `./reference/operations.md` (Section 9: PDB / Maintenance)
-
----
-
-## 13. Readiness Gate
-
-Detail: `./reference/operations.md` (Section 7: Readiness Gate)
-
----
+`aerospikeNetworkPolicy.accessType`, LoadBalancer seeds, NetworkPolicy: ops ref §8. `disablePDB`, `maxUnavailable`, `k8sNodeBlockList`: ops ref §9. `podSpec.readinessGateEnabled`: ops ref §7.
 
 ## 14. Troubleshooting
 
-For systematic outage diagnosis (`phase=Error`, stuck migrations, `CrashLoopBackOff`, `CircuitBreakerActive`, `ConfigDegraded`, `ReadinessGateBlocking`, webhook rejection, `dynamicConfigStatus=Failed`, paused reconciliation), use the dedicated **`acko-debugging` skill** — it carries the 6-step procedure, CE 8.1 pitfalls, and remediation matrix that used to live here.
+For symptom-driven diagnosis (`phase=Error`, stuck migrations, `CrashLoopBackOff`, `CircuitBreakerActive`, `ConfigDegraded`, `ReadinessGateBlocking`, webhook rejection, `dynamicConfigStatus=Failed`), use the **`acko-debugging`** skill. It cross-links this skill's `reference/troubleshooting.md` (symptom→command table) and `reference/validation-rules.md` (canonical webhook error/warning catalog).
 
-`reference/troubleshooting.md` and `reference/validation-rules.md` (kept in this skill) remain the canonical symptom-→command and webhook-error catalogs that `acko-debugging` cross-links into.
+## 15. Diagnostics / Metrics / Events / OTel
 
----
-
-## 15. Diagnostic Commands Quick Reference
-
-Detail: `./reference/diagnostic-commands.md`
+kubectl one-liners: [`./reference/diagnostic-commands.md`](./reference/diagnostic-commands.md) · operator Prometheus metrics + alerts: [`./reference/metrics.md`](./reference/metrics.md) · K8s events catalog: [`./reference/events.md`](./reference/events.md) · operator OTel export (helm enable/verify): ops ref §13, chart config rules in **acko-deploy**.
 
 ---
 
-## 16. OpenTelemetry Observability
-
-The operator can export its **reconcile traces, metrics, and logs** to an OTLP/gRPC collector — off by default. Enable it on a running cluster with a Helm upgrade (no CR change):
-
-```bash
-helm upgrade acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  -n aerospike-operator --reuse-values \
-  --set observability.otel.enabled=true \
-  --set observability.otel.endpoint=otel-collector.observability.svc.cluster.local:4317
-```
-
-The Deployment rolls; the new pod logs `OpenTelemetry export enabled`. Confirm export is flowing — a blocked egress instead logs `missing address` / `context deadline exceeded`:
-
-```bash
-kubectl -n aerospike-operator logs -l control-plane=controller-manager --tail=50 | grep -iE 'otel|export'
-```
-
-The collector then receives reconcile spans (`Reconcile` → `reconcileCluster` → `reconcileRacks`), the `acko_*` + controller-runtime metrics, and operator logs. Disable again with `--set observability.otel.enabled=false`.
-
-Config rules — `enabled` + `endpoint` both required, OTLP/gRPC endpoint scheme, the auto-added NetworkPolicy egress (`observability.otel.collectorPort`) — are covered in **acko-deploy**.
-
----
-
-## Reference Documents
-
-- [Operations Reference](./reference/operations.md) -- Detailed Day-2 operations with all kubectl commands
-- [Events Reference](./reference/events.md) -- Kubernetes events emitted by ACKO (including 2PC dynamic-config events)
-- [Troubleshooting Reference](./reference/troubleshooting.md) -- Symptom-based diagnostic table with commands
-- [Validation Rules Reference](./reference/validation-rules.md) -- Webhook error/warning catalog (canonical source)
-- [Diagnostic Commands](./reference/diagnostic-commands.md) -- kubectl one-liners for common diagnostics
-- [Operator Metrics](./reference/metrics.md) -- Prometheus metrics emitted by the operator
+Full Day-2 command detail: [Operations Reference](./reference/operations.md) · [Events](./reference/events.md) · [Troubleshooting](./reference/troubleshooting.md) · [Validation Rules](./reference/validation-rules.md) · [Diagnostic Commands](./reference/diagnostic-commands.md) · [Metrics](./reference/metrics.md)

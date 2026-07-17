@@ -15,7 +15,7 @@ Deploy Aerospike Community Edition clusters on Kubernetes using the ACKO operato
 
 Operator running + CRD installed: `kubectl get pods -n aerospike-operator -l control-plane=controller-manager` and `kubectl api-resources | grep aerospikeclusters`.
 
-**Installing the operator (Helm).** ACKO ships as an OCI Helm chart bundling operator + webhook + Cluster Manager UI (`api` + `web`), all enabled by default. cert-manager must be installed first (provisions the webhook TLS cert):
+Not installed? Install via Helm (cert-manager first, then the OCI chart):
 
 ```bash
 helm repo add jetstack https://charts.jetstack.io && helm repo update jetstack
@@ -26,19 +26,7 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
   -n aerospike-operator --create-namespace
 ```
 
-The UI `api` pod stores connection metadata (not Aerospike data). Default backend is embedded **SQLite** on a 1Gi PVC; the chart **never deploys PostgreSQL**. UI web frontend listens on 3100 (`kubectl port-forward svc/acko-aerospike-ce-kubernetes-operator-ui-web 3100:3100`).
-
-ACKO-specific install variants:
-
-| Goal | Flags |
-|------|-------|
-| Operator only, no UI | `--set ui.api.enabled=false --set ui.web.enabled=false` |
-| External PostgreSQL (HA) | `--set ui.database.type=postgresql --set ui.database.postgresql.databaseUrl="postgresql://..."` (or `...existingSecret`) |
-| CRDs managed separately (GitOps) | `--set crds.install=false` |
-
-SQLite is single-writer, so the chart pins `ui.replicaCount=1` and **fails the install if raised** — use external PostgreSQL for a multi-replica UI.
-
-**OpenTelemetry export (operator).** Off by default; needs **both** `observability.otel.enabled=true` AND a non-empty `observability.otel.endpoint` (either alone is inert / fails rendering). Exports **OTLP/gRPC only** — scheme-less `host:port` is normalized to `http://`, so pass `https://` for a TLS collector. With `networkPolicy.enabled`/`cilium.enabled`, the chart auto-adds the collector egress rule (`observability.otel.collectorPort`, default `4317`). The chart never deploys a collector. See **acko-operations** for runtime enable/verify.
+Chart variants (operator-only, external PostgreSQL for the UI, GitOps-managed CRDs), the SQLite single-replica constraint, and operator OTel export wiring: [`./reference/helm-install.md`](./reference/helm-install.md).
 
 ### Step 2: Apply the Minimal CR
 
@@ -63,17 +51,13 @@ spec:
         context: any info
 ```
 
-Save this as `aerospike-basic.yaml` and apply:
-```bash
-kubectl apply -f aerospike-basic.yaml
-```
+Save as `aerospike-basic.yaml`, then `kubectl apply -f aerospike-basic.yaml`.
 
-### Step 3: Verify Deployment
+### Step 3: Verify
 
 ```bash
 # phase=Completed typically takes 30-90s; pod naming is <cr-name>-<rack>-<idx>
 kubectl wait --for=jsonpath='{.status.phase}'=Completed asc/aerospike-basic -n aerospike --timeout=120s
-kubectl get asc aerospike-basic -n aerospike
 kubectl exec -n aerospike aerospike-basic-0-0 -c aerospike-server -- asinfo -v status
 ```
 
@@ -81,76 +65,35 @@ kubectl exec -n aerospike aerospike-basic-0-0 -c aerospike-server -- asinfo -v s
 
 ## 2. CE Constraints (Webhook-Enforced)
 
-These constraints are enforced by the ACKO validating webhook. Violating any of them causes the CR to be rejected at apply time.
+Violating any of these rejects the CR at apply time. The most common trip-wires:
 
-1. **Cluster size**: `spec.size` must be between 1 and 8 (inclusive).
-2. **Namespaces**: Maximum 2 namespaces in `aerospikeConfig.namespaces`.
-3. **No XDR**: `aerospikeConfig` must not contain an `xdr` section (Enterprise-only).
-4. **No TLS**: `aerospikeConfig` must not contain a `tls` section (Enterprise-only).
-5. **No Enterprise images**: `spec.image` must not contain `enterprise`, `ee-`, or `ent-`.
-6. **Mesh heartbeat only**: `network.heartbeat.mode` must be `mesh`.
-7. **Byte values as integers**: All size values in `aerospikeConfig` (such as `data-size`, `filesize`) must be specified as integer byte counts, not human-readable strings.
-8. **Replication factor**: Must be between 1 and 4, and must not exceed `spec.size`.
-9. **No Enterprise namespace keys**: The following keys are forbidden in namespace config: `compression`, `compression-level`, `durable-delete`, `fast-restart`, `index-type`, `sindex-type`, `rack-id`, `strong-consistency`, `tomb-raider-eligible-age`, `tomb-raider-period`.
-10. **No Enterprise security keys**: Only `enable-security` and `default-password-file` are allowed in `aerospikeConfig.security`. The keys `tls`, `ldap`, `log`, `syslog` are forbidden.
-11. **Strengthened map/list shapes (April 2026)**: `aerospikeConfig.service` and `aerospikeConfig.network` must be YAML maps; `aerospikeConfig.logging` must be a YAML list; each `namespaces[]` entry must be a map with a `name` key. `MetricLabels` values are TOML-escaped — control characters are rejected. Within one update, namespace `rack-id` may be added OR removed but not both (prevents data loss on rename).
-12. **Operations spec invariants**: `spec.operations[].kind` must be `WarmRestart` or `PodRestart`; `spec.operations[].id` length 1–20 chars; the operations list cannot be modified while one operation is `InProgress`. `spec.overrides` only valid when `spec.templateRef` is set.
-13. **CE image minimum**: `spec.image` must be CE major ≥ 8 (e.g. `ce-7`, dotless `7`, `ce-7.x` are rejected). Tag parsing handles ported registries (`host:5000/aerospike:...`) and `@sha256:` digests.
-14. **Unique namespace names**; **no Enterprise logging contexts** (`audit`, `report-data-op*`, `report-sys-admin`, `report-user-admin`, `report-violation`, `report-authentication`); `logging` entries must be maps with a non-empty `name`.
-15. **ACL privilege scope**: admin codes (`sys-admin`/`user-admin`/`data-admin`) are global-only (no `.namespace`/`.set` scope); scopes on other codes must be `<ns>` or `<ns>.<set>` with no empty/extra components.
-16. **Monitoring**: `serviceMonitor.interval` must be a Prometheus duration (e.g. `30s`); `serviceMonitor.labels`/`prometheusRule.labels` must be valid K8s labels.
-17. **Per-rack `aerospikeConfig`** overrides are validated against the same CE constraints as cluster-level config (no CE bypass via rack override).
+- `spec.size` 1–8; max **2** namespaces; unique namespace names; replication-factor 1–4 integer and ≤ size.
+- **No Enterprise anything**: no `xdr`/`tls` sections, no enterprise image (`enterprise`/`ee-`/`ent-`/`aerospike-server-enterprise`), CE image major ≥ 8 (`ce-7`, dotless `7` rejected), no enterprise namespace keys (`strong-consistency`, `compression`, …), security keys limited to `enable-security`/`default-password-file`, no enterprise logging contexts (`audit`, `report-*`).
+- **Shapes**: `service`/`network` maps; `logging` a list; `namespaces` a list of maps each with `name`; byte values as **integer bytes** (not `"1Gi"`).
+- **Fixed network ports**: service=3000, fabric=3001, heartbeat=3002 — overrides rejected; `heartbeat.mode` must be `mesh`.
+- **ACL**: admin privilege codes are global-only; scopes must be `<ns>` or `<ns>.<set>`; at least one user with both `sys-admin`+`user-admin`.
+- **Operations/templates**: one operation at a time (`WarmRestart`/`PodRestart`, id 1–20 chars, immutable while `InProgress`); `spec.overrides` only with `templateRef` (contents CE-validated); `templateRef` immutable; per-rack `aerospikeConfig` validated like cluster-level config.
+- **Monitoring**: `serviceMonitor.interval` a Prometheus duration; labels valid K8s labels; sidecar/initContainer names unique and not `aerospike-server`/`aerospike-init`.
+
+Canonical catalog with exact error strings: `acko-operations/reference/validation-rules.md` (same plugin). Shape-and-constraint summary for drafting YAML: `acko-config-reference/reference/webhook-validation.md`.
 
 ---
 
 ## 3. Deployment Scenarios
 
-Choose the scenario that matches your needs. Each links to a ready-to-use YAML example.
+Each scenario is a ready-to-use YAML example in `./examples/`:
 
-### Scenario 1: Minimal In-Memory (Dev/Test)
-- **File**: [./examples/01-minimal.yaml](./examples/01-minimal.yaml)
-- **Use when**: Quick local dev, CI tests, learning ACKO
-- **Key features**: 1 node, in-memory storage, no persistence, no ACL
-
-### Scenario 2: 3-Node with Persistent Volume (Staging/Production Baseline)
-- **File**: [./examples/02-3node-pv.yaml](./examples/02-3node-pv.yaml)
-- **Use when**: You need data persistence across pod restarts
-- **Key features**: 3 nodes, PVC-backed device storage, resource limits, cascadeDelete
-
-### Scenario 3: ACL (Access Control)
-- **File**: [./examples/03-acl.yaml](./examples/03-acl.yaml)
-- **Use when**: You need authentication and role-based access control
-- **Key features**: security stanza, admin user (sys-admin + user-admin required), K8s Secrets for passwords
-
-### Scenario 4: Prometheus Monitoring
-- **File**: [./examples/04-monitoring.yaml](./examples/04-monitoring.yaml)
-- **Use when**: You need metrics, dashboards, and alerting
-- **Key features**: Exporter sidecar, ServiceMonitor, PrometheusRule, metric labels
-
-### Scenario 5: Multi-Rack (Zone-Aware Topology)
-- **File**: [./examples/05-multirack.yaml](./examples/05-multirack.yaml)
-- **Use when**: You need high availability across availability zones
-- **Key features**: 3 racks pinned to zones, rack-aware replication
-
-### Scenario 6: Advanced Storage
-- **File**: [./examples/06-storage-advanced.yaml](./examples/06-storage-advanced.yaml)
-- **Use when**: You need block devices, hostPath, CSI, local PV, or sidecar mounts
-- **Key features**: Volume policies, block volumes, mount propagation, sidecar sharing
-
-### Scenario 7: Template-Based
-- **File**: [./examples/07-template.yaml](./examples/07-template.yaml)
-- **Use when**: You manage multiple clusters with shared configuration
-- **Key features**: AerospikeClusterTemplate, templateRef, overrides, resync annotation
-
-### Scenario 8: Full-Featured
-- **File**: [./examples/08-full-featured.yaml](./examples/08-full-featured.yaml)
-- **Use when**: Production deployment with all features enabled
-- **Key features**: ACL + monitoring + multi-rack + PV + PDB + dynamic config
-
-### Scenario 9: On-Demand Operations (WarmRestart / PodRestart)
-- **File**: [./examples/09-operations.yaml](./examples/09-operations.yaml)
-- **Use when**: You need to manually restart pods (warm via SIGUSR1, or full pod recreate) without changing spec
-- **Key features**: `spec.operations[]` with `WarmRestart` (SIGUSR1) or `PodRestart` (delete+recreate); optional `podList` to target specific pods; webhook prevents modifying the operations list while one is `InProgress`
+| # | File | Use when — key features |
+|---|------|-------------------------|
+| 1 | [01-minimal.yaml](./examples/01-minimal.yaml) | Local dev / CI — 1 node, in-memory, no persistence, no ACL |
+| 2 | [02-3node-pv.yaml](./examples/02-3node-pv.yaml) | Persistence — 3 nodes, PVC-backed device storage, resource limits, cascadeDelete |
+| 3 | [03-acl.yaml](./examples/03-acl.yaml) | Auth + RBAC — security stanza, admin user (sys-admin + user-admin), K8s Secrets |
+| 4 | [04-monitoring.yaml](./examples/04-monitoring.yaml) | Metrics/alerting — exporter sidecar, ServiceMonitor, PrometheusRule, metric labels |
+| 5 | [05-multirack.yaml](./examples/05-multirack.yaml) | Zone HA — 3 racks pinned to zones, rack-aware replication |
+| 6 | [06-storage-advanced.yaml](./examples/06-storage-advanced.yaml) | Block devices, hostPath, CSI, local PV, sidecar mounts, mount propagation |
+| 7 | [07-template.yaml](./examples/07-template.yaml) | Shared config — AerospikeClusterTemplate, templateRef, overrides, resync annotation |
+| 8 | [08-full-featured.yaml](./examples/08-full-featured.yaml) | Production — ACL + monitoring + multi-rack + PV + PDB + dynamic config |
+| 9 | [09-operations.yaml](./examples/09-operations.yaml) | Manual restarts — `spec.operations[]` WarmRestart (SIGUSR1) / PodRestart, optional `podList` |
 
 > **Monitoring sample note (`04-monitoring.yaml`)**: `metricLabels` values are TOML-escaped (double-quote-wrapped, backslash-escaped, control chars rejected); the demo `emptyDir` mounts at `/opt/aerospike/work`, not `/opt/aerospike`.
 
@@ -158,44 +101,30 @@ Choose the scenario that matches your needs. Each links to a ready-to-use YAML e
 
 ## 4. CR Spec Reference
 
-Detail: `./reference/cr-spec-fields.md`
-
----
+Detail: [`./reference/cr-spec-fields.md`](./reference/cr-spec-fields.md)
 
 ## 5. Webhook Auto-Settings
 
-Webhook auto-settings and CRD field mapping: See acko-config-reference skill's `reference/crd-mapping.md`
-
----
+Auto-set values and CRD→aerospike.conf field mapping: acko-config-reference skill's `reference/crd-mapping.md`.
 
 ## 6. Verification Commands
 
 CR-specific status fields worth knowing — everything else is a normal `kubectl get pods/events` / `kubectl exec asinfo` flow:
 
 ```bash
-kubectl get asc -n <ns>                                                                    # all clusters with phase + ready/total
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.phase}'                                # current phase
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.phaseReason}'                          # why (when Error / InProgress)
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.conditions}' | jq .                    # ReconcileHealthy / DynamicConfigDegraded / etc.
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods}' | jq .                          # per-pod state (rack, dynamicConfigStatus, …)
+kubectl get asc -n <ns>                                                    # all clusters with phase + ready/total
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.phase}'               # current phase
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.phaseReason}'         # why (when Error / InProgress)
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.conditions}' | jq .   # ReconcileHealthy / DynamicConfigDegraded / etc.
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods}' | jq .         # per-pod state (rack, dynamicConfigStatus, …)
 ```
 
 For systematic diagnosis when something is wrong, load the `acko-debugging` skill.
 
----
+## 7. Byte Values / CE 8.1 Notes
 
-## 7. Byte Value Reference
+Byte-count conversion table: acko-config-reference skill's `reference/byte-values.md`. CE 8.1 parameter changes (`data-size` not `memory-size`, no `info` port block, …): acko-config-reference skill.
 
-Byte values: See acko-config-reference skill's `reference/byte-values.md`
-
----
-
-## 8. CE 8.1 Configuration Notes
-
-CE 8.1 notes: See acko-config-reference skill
-
----
-
-## 9. Template Notes
+## 8. Template Notes
 
 Template-derived fields (`PodSpec.PodAntiAffinity`, `Resources`, `Storage`) reach the StatefulSet and persist across reconciles — no need to inline template values into `spec.overrides`. `VolumeClaimTemplate` updates remain immutable (VCTs are set only at StatefulSet creation time).
