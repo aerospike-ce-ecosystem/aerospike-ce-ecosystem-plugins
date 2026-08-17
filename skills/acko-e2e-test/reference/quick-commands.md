@@ -2,6 +2,8 @@
 
 Reference snippets for the scenarios listed in `SKILL.md`. Pull these in only when actually running the corresponding check; they're separated to keep the SKILL frontmatter scannable.
 
+**Working directory:** unless a block says otherwise, these run from the root of a local **`aerospike-ce-kubernetes-operator`** clone — that is what `./charts/…`, `./test/e2e/`, and the `make` targets resolve against. This is a different directory from the plugin's own bundled `e2e_pytest` project, which `SKILL.md` enters via `${CLAUDE_PLUGIN_ROOT}`. See `SKILL.md` for how the operator clone is discovered (`$OPERATOR_REPO` and fallbacks).
+
 ## Kind cluster lifecycle
 
 ```bash

@@ -20,7 +20,7 @@ The skill is opinionated about three things:
 Needs: `uv`, `kind`, `podman`, `kubectl`, `helm`, `go`, `jq` plus a local clone of `aerospike-ce-kubernetes-operator`. One-shot installer:
 
 ```bash
-cd skills/acko-e2e-test/e2e_pytest
+cd "${CLAUDE_PLUGIN_ROOT}/skills/acko-e2e-test/e2e_pytest"
 bash scripts/bootstrap.sh                 # install everything missing (apt or brew)
 bash scripts/bootstrap.sh --check         # status only — install nothing
 bash scripts/bootstrap.sh --no-operator   # don't auto-clone the operator repo
@@ -31,7 +31,7 @@ The operator repo is discovered automatically — `helpers/env.py` tries (in ord
 ## How to run
 
 ```bash
-cd skills/acko-e2e-test/e2e_pytest
+cd "${CLAUDE_PLUGIN_ROOT}/skills/acko-e2e-test/e2e_pytest"
 uv sync                          # one-time: pull pytest + httpx + pyyaml + tenacity
 
 uv run pytest -m chart           # fast gate — chart-template only, no Kind (~5s)
