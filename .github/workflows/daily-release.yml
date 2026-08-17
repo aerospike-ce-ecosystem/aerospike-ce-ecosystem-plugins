@@ -71,6 +71,32 @@ jobs:
           echo "next_version=${NEXT}" >> "$GITHUB_OUTPUT"
           echo "Bumping ${LATEST_TAG} → ${NEXT}"
 
+      # VERSIONING.md step 1: the manifest version is updated before the tag is
+      # created, so the tag points at a commit whose plugin.json already matches.
+      # Pushing before `gh release create --target main` also keeps this commit
+      # inside the new tag, so it does not trigger another release tomorrow.
+      - name: Sync plugin manifest version
+        if: steps.changes.outputs.skip == 'false'
+        run: |
+          # plugin.json records bare semver; git tags carry the 'v' prefix.
+          MANIFEST_VERSION="${{ steps.version.outputs.next_version }}"
+          MANIFEST_VERSION="${MANIFEST_VERSION#v}"
+
+          jq --arg v "$MANIFEST_VERSION" '.version = $v' .claude-plugin/plugin.json > plugin.json.tmp
+          mv plugin.json.tmp .claude-plugin/plugin.json
+
+          if git diff --quiet .claude-plugin/plugin.json; then
+            echo "plugin.json already at ${MANIFEST_VERSION}. Nothing to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .claude-plugin/plugin.json
+          git commit -m "chore(release): sync plugin.json to ${MANIFEST_VERSION}"
+          git push origin HEAD:main
+          echo "plugin.json → ${MANIFEST_VERSION}"
+
       - name: Generate release notes with Claude
         if: steps.changes.outputs.skip == 'false'
         uses: anthropics/claude-code-action@v1
