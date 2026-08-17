@@ -122,8 +122,13 @@ helm template t . --set ui.web.enabled=false --set ui.ingress.enabled=true 2>&1 
 ## Operator metrics
 
 ```bash
-# port-forward and curl
-kubectl -n aerospike-operator port-forward svc/aerospike-ce-kubernetes-operator-controller-manager-metrics-service 8443:8443 &
+# port-forward and curl. Target the pod, not the Service: the metrics Service
+# name is release-dependent (`<release>-aerospike-ce-kubernetes-operator-metrics`),
+# and selecting a Service by `control-plane=controller-manager` is ambiguous —
+# both the metrics and webhook Services carry that label. Pods carry it too,
+# under both Helm and kustomize.
+kubectl -n aerospike-operator port-forward \
+  "$(kubectl -n aerospike-operator get pod -l control-plane=controller-manager -o name | head -1)" 8443:8443 &
 curl -k https://localhost:8443/metrics | grep "^acko_"
 ```
 
@@ -180,8 +185,13 @@ for i in $(seq 1 10); do
   kubectl patch asc -n $NS $NAME --type=merge -p '{"spec":{"size":'$((9 + i))'}}' || true
 done
 
-# Watch breaker state in status (introduced in PR #234)
-kubectl get asc -n $NS $NAME -o jsonpath='{.status.conditions[?(@.type=="ReconcileBackoff")]}{"\n"}'
+# Watch breaker state in status (introduced in PR #234).
+# The condition type is `ReconcileHealthy` — False with reason `PermanentError`
+# while the breaker is open, True with reason `ReconcileSucceeded` once it resets.
+kubectl get asc -n $NS $NAME -o jsonpath='{.status.conditions[?(@.type=="ReconcileHealthy")]}{"\n"}'
+
+# The phase reports the same state as `BackoffActive`.
+kubectl get asc -n $NS $NAME -o jsonpath='{.status.phase}{"\n"}'
 ```
 
 ## OTel "really disabled" check
@@ -282,6 +292,6 @@ If any step fails the script aborts (`set -e`); the port-forward is cleaned up b
 
 ```bash
 kubectl delete asc -A --all --wait=false
-kubectl delete pvc -A -l app.kubernetes.io/managed-by=aerospike-operator --wait=false
+kubectl delete pvc -A -l app.kubernetes.io/managed-by=aerospike-ce-kubernetes-operator --wait=false
 make cleanup-test-e2e
 ```

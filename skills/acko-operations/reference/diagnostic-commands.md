@@ -13,7 +13,7 @@ kubectl get asc <name> -n <ns> -o jsonpath='{.status.lastReconcileError}'    # L
 kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods}' | jq .       # Detailed pod status
 kubectl get asc <name> -n <ns> -o jsonpath='{.status.size}'              # Ready pod count
 kubectl get asc <name> -n <ns> -o jsonpath='{.status.pendingRestartPods}' # Pods pending restart
-kubectl get pods -n <ns> -l aerospike.io/cr-name=<name> -o wide          # Pod list with nodes
+kubectl get pods -n <ns> -l app.kubernetes.io/instance=<name> -o wide          # Pod list with nodes
 
 # ===== Events =====
 kubectl get events -n <ns> --field-selector involvedObject.name=<name> --sort-by='.lastTimestamp'
@@ -44,7 +44,7 @@ kubectl get asc <name> -n <ns> -o jsonpath='{.status.templateSnapshot.synced}'
 kubectl get events -n <ns> --field-selector reason=TemplateDrifted
 
 # ===== PVC Status =====
-kubectl get pvc -n <ns> -l aerospike.io/cr-name=<name>
+kubectl get pvc -n <ns> -l app.kubernetes.io/instance=<name>
 
 # ===== Operation Status =====
 kubectl get asc <name> -n <ns> -o jsonpath='{.status.operation}' | jq .   # phase, completedPods, failedPods

@@ -39,14 +39,14 @@ description: "MUST USE when an ACKO/Aerospike CE Ecosystem user hits an error, b
 ## 2. 제보 전에 먼저 할 일
 
 1. **중복 검색** — `gh issue list --repo aerospike-ce-ecosystem/<repo> --search "<error message snippet>"` 로 같은 증상이 이미 올라와 있는지 확인.
-2. **최신 버전 확인** — 이미 고쳐졌을 수 있습니다. aerospike-py: `pip show aerospike-py` vs PyPI 최신 / ACKO: `kubectl -n aerospike-operator get deploy aerospike-operator-controller-manager -o jsonpath='{.spec.template.spec.containers[0].image}'` / cluster-manager: UI 우하단 build info 또는 API `/api/v1/version` / ackoctl: `ackoctl version`.
+2. **최신 버전 확인** — 이미 고쳐졌을 수 있습니다. aerospike-py: `pip show aerospike-py` vs PyPI 최신 / ACKO: `kubectl -n aerospike-operator get pod -l control-plane=controller-manager -o jsonpath='{.items[0].spec.containers[0].image}'` / cluster-manager: `kubectl -n aerospike-operator get pod -l app.kubernetes.io/component=ui-api -o jsonpath='{.items[0].spec.containers[0].image}'` / ackoctl: `ackoctl version`.
 3. **재현 최소화** — minimal reproducer로 줄이세요. CR YAML이면 size=1, 단일 namespace로; Python 코드면 5~10줄 안으로.
 
 ## 3. 이슈 본문 템플릿 (repo별)
 
 공통 헤더(환경/재현 단계/기대·실제 동작/로그)와 repo별 필수 첨부물 체크리스트: **[`./reference/issue-templates.md`](./reference/issue-templates.md)**
 
-핵심만 요약: aerospike-py는 `python --version` + traceback(+`RUST_BACKTRACE=1`), ACKO는 CR YAML(민감정보 제거) + `describe asc` Events + operator log, cluster-manager는 실패한 API 요청/콘솔 에러 + `/api/v1/version`, ackoctl은 `ackoctl version` + `-v` 재실행 출력(token redact), plugins는 skill 이름 + prompt + 잘못된 답변, project-hub는 영향 repo 목록.
+핵심만 요약: aerospike-py는 `python --version` + traceback(+`RUST_BACKTRACE=1`), ACKO는 CR YAML(민감정보 제거) + `describe asc` Events + operator log, cluster-manager는 실패한 API 요청/콘솔 에러 + 배포된 api 컨테이너 image tag, ackoctl은 `ackoctl version` + `-v` 재실행 출력(token redact), plugins는 skill 이름 + prompt + 잘못된 답변, project-hub는 영향 repo 목록.
 
 ## 4. 라벨 가이드
 

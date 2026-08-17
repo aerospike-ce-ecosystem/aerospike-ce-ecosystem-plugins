@@ -57,7 +57,7 @@ spec:
         aerospike:
           path: /opt/aerospike/data
         cascadeDelete: false         # Retain PVCs after CR deletion (manual cleanup required)
-        # To clean up manually: kubectl delete pvc -n aerospike -l aerospike.io/cr-name=aerospike-multirack
+        # To clean up manually: kubectl delete pvc -n aerospike -l app.kubernetes.io/instance=aerospike-multirack
 
   aerospikeConfig:
     service:

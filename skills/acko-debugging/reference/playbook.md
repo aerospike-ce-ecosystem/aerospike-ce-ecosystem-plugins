@@ -80,8 +80,8 @@ Usually normal during scale-down. Report `migrationStatus.remainingPartitions` p
 ### Phase = `InProgress` (stuck > 5 minutes)
 
 ```bash
-kubectl get pods -n <ns> -l aerospike.io/cr-name=<name> -o wide
-kubectl get pvc -n <ns> -l aerospike.io/cr-name=<name>
+kubectl get pods -n <ns> -l app.kubernetes.io/instance=<name> -o wide
+kubectl get pvc -n <ns> -l app.kubernetes.io/instance=<name>
 kubectl describe pod <pending-or-failing-pod> -n <ns> | tail -30
 kubectl -n aerospike-operator logs -l control-plane=controller-manager --tail=100
 ```
@@ -110,7 +110,7 @@ When `query exec` returns a truncation marker, the result set was capped by `--m
 `kubectl exec` fallback (only if `ackoctl` is unavailable):
 
 ```bash
-kubectl get pods -n <ns> -l aerospike.io/cr-name=<name>
+kubectl get pods -n <ns> -l app.kubernetes.io/instance=<name>
 kubectl exec -n <ns> <pod> -c aerospike-server -- asinfo -v status
 kubectl exec -n <ns> <pod> -c aerospike-server -- asinfo -v 'statistics' | tr ';' '\n' | grep cluster_size
 kubectl exec -n <ns> <pod> -c aerospike-server -- asinfo -v 'namespace/<ns-name>'
@@ -134,7 +134,8 @@ For any pods not in `Running` state — prefer ackoctl, fall back to kubectl:
 ```bash
 # ackoctl path
 ackoctl --context={ctx} k8s cluster logs <ns>/<name> --pod=<pod> --container=aerospike-server --since=10m --tail=200
-ackoctl --context={ctx} k8s cluster logs <ns>/<name> --pod=<pod> --container=aerospike-server --previous   # if CrashLoopBackOff
+# ackoctl has no `--previous` equivalent (its logs verb takes only --pod, --container,
+# --tail, --since), so for CrashLoopBackOff fall back to kubectl below.
 
 # kubectl fallback
 kubectl describe pod <pod> -n <ns>

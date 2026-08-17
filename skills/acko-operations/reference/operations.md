@@ -327,7 +327,7 @@ Wait for completion. Operator auto-proceeds.
 
 ```bash
 kubectl get events -n <ns> --field-selector involvedObject.name=<name> --sort-by='.lastTimestamp'
-kubectl get pvc -n <ns> -l aerospike.io/cr-name=<name>
+kubectl get pvc -n <ns> -l app.kubernetes.io/instance=<name>
 kubectl -n aerospike-operator logs -l control-plane=controller-manager --tail=100
 ```
 
@@ -376,7 +376,7 @@ kubectl delete asc <name> -n <ns>
 Sequence:
 1. `ClusterDeletionStarted` event -> Phase `Deleting`
 2. `cascadeDelete: true`: PVCs automatically deleted
-3. `cascadeDelete: false`: PVCs retained; manual cleanup: `kubectl delete pvc -n <ns> -l aerospike.io/cr-name=<name>`
+3. `cascadeDelete: false`: PVCs retained; manual cleanup: `kubectl delete pvc -n <ns> -l app.kubernetes.io/instance=<name>`
 4. `FinalizerRemoved` event -> CR deleted
 
 ---
