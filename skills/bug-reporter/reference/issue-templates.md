@@ -66,7 +66,7 @@ UI 버그:
 - 배포된 api 컨테이너 image tag (버전 endpoint는 없습니다):
   ```bash
   kubectl -n aerospike-operator get pod -l app.kubernetes.io/component=ui-api \
-    -o jsonpath='{.items[0].spec.containers[?(@.name=="api")].image}'
+    -o jsonpath='{.items[0].spec.containers[0].image}'
   ```
 
 ## `ackoctl`

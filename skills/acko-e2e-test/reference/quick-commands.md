@@ -120,10 +120,11 @@ helm template t . --set ui.web.enabled=false --set ui.ingress.enabled=true 2>&1 
 ## Operator metrics
 
 ```bash
-# port-forward and curl. The metrics Service name is release-dependent
-# (`<release>-aerospike-ce-kubernetes-operator-metrics`), and the Service's own
-# metadata labels do not carry `control-plane`, so target the pod instead — pods
-# carry `control-plane=controller-manager` under both Helm and kustomize.
+# port-forward and curl. Target the pod, not the Service: the metrics Service
+# name is release-dependent (`<release>-aerospike-ce-kubernetes-operator-metrics`),
+# and selecting a Service by `control-plane=controller-manager` is ambiguous —
+# both the metrics and webhook Services carry that label. Pods carry it too,
+# under both Helm and kustomize.
 kubectl -n aerospike-operator port-forward \
   "$(kubectl -n aerospike-operator get pod -l control-plane=controller-manager -o name | head -1)" 8443:8443 &
 curl -k https://localhost:8443/metrics | grep "^acko_"

@@ -39,7 +39,7 @@ description: "MUST USE when an ACKO/Aerospike CE Ecosystem user hits an error, b
 ## 2. 제보 전에 먼저 할 일
 
 1. **중복 검색** — `gh issue list --repo aerospike-ce-ecosystem/<repo> --search "<error message snippet>"` 로 같은 증상이 이미 올라와 있는지 확인.
-2. **최신 버전 확인** — 이미 고쳐졌을 수 있습니다. aerospike-py: `pip show aerospike-py` vs PyPI 최신 / ACKO: `kubectl -n aerospike-operator get pod -l control-plane=controller-manager -o jsonpath='{.items[0].spec.containers[0].image}'` / cluster-manager: `kubectl -n aerospike-operator get pod -l app.kubernetes.io/component=ui-api -o jsonpath='{.items[0].spec.containers[?(@.name=="api")].image}'` / ackoctl: `ackoctl version`.
+2. **최신 버전 확인** — 이미 고쳐졌을 수 있습니다. aerospike-py: `pip show aerospike-py` vs PyPI 최신 / ACKO: `kubectl -n aerospike-operator get pod -l control-plane=controller-manager -o jsonpath='{.items[0].spec.containers[0].image}'` / cluster-manager: `kubectl -n aerospike-operator get pod -l app.kubernetes.io/component=ui-api -o jsonpath='{.items[0].spec.containers[0].image}'` / ackoctl: `ackoctl version`.
 3. **재현 최소화** — minimal reproducer로 줄이세요. CR YAML이면 size=1, 단일 namespace로; Python 코드면 5~10줄 안으로.
 
 ## 3. 이슈 본문 템플릿 (repo별)
