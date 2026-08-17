@@ -44,7 +44,10 @@
 - `kubectl describe asc <name> -n <ns>` 의 Events 섹션
 - Operator log 의 reconcile 실패 구간 (앞뒤 30줄)
   ```bash
-  kubectl -n aerospike-operator logs deploy/aerospike-operator-controller-manager --since=10m | tail -200
+  # Deployment 이름은 설치 방식에 따라 다릅니다(Helm: `<release>-aerospike-ce-kubernetes-operator`,
+  # kustomize: `aerospike-ce-kubernetes-operator-controller-manager`). 양쪽 모두 pod에
+  # `control-plane=controller-manager` 라벨이 붙으므로 라벨로 선택하세요.
+  kubectl -n aerospike-operator logs -l control-plane=controller-manager --since=10m --tail=200
   ```
 - `phase`, `conditions`, `lastReconcileTime`
 - CE 환경임을 명시 (Enterprise 기능 시도가 아닌지 한번 자문)
@@ -53,14 +56,18 @@
 
 UI 버그:
 - 브라우저 + 버전 (Chrome 138 / Safari 17 …)
-- 재현 페이지 URL 패스 (`/clusters/<id>/records/...`)
+- 재현 페이지 URL 패스 (예: `/clusters/<clusterId>/sets/<namespace>/<set>/records/<key>`)
 - 브라우저 콘솔 에러 + Network 탭에서 실패한 API 요청 (Request/Response)
 - 스크린샷 또는 짧은 화면 녹화
 
 백엔드 버그:
 - 호출한 endpoint와 method, payload
 - FastAPI traceback (`uvicorn` 로그)
-- `/api/v1/version` 결과
+- 배포된 api 컨테이너 image tag (버전 endpoint는 없습니다):
+  ```bash
+  kubectl -n aerospike-operator get pod -l app.kubernetes.io/component=ui-api \
+    -o jsonpath='{.items[0].spec.containers[?(@.name=="api")].image}'
+  ```
 
 ## `ackoctl`
 

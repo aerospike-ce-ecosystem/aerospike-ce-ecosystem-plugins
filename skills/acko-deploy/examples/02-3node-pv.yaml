@@ -14,7 +14,7 @@
 #
 # Verify:
 #   kubectl get asc aerospike-3node -n aerospike -w
-#   kubectl get pvc -n aerospike -l aerospike.io/cr-name=aerospike-3node
+#   kubectl get pvc -n aerospike -l app.kubernetes.io/instance=aerospike-3node
 #
 apiVersion: acko.io/v1alpha1
 kind: AerospikeCluster

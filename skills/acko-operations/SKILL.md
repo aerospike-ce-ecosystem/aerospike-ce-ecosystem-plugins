@@ -70,7 +70,7 @@ Resume clears stale `failedReconcileCount`/`lastReconcileError` — the recommen
 
 ## 7. Delete Cluster (ops ref §12)
 
-`kubectl delete asc <name> -n <ns>` → `ClusterDeletionStarted` → `Deleting` → `FinalizerRemoved`. `cascadeDelete: true` deletes PVCs; otherwise clean up with `kubectl delete pvc -n <ns> -l aerospike.io/cr-name=<name>`.
+`kubectl delete asc <name> -n <ns>` → `ClusterDeletionStarted` → `Deleting` → `FinalizerRemoved`. `cascadeDelete: true` deletes PVCs; otherwise clean up with `kubectl delete pvc -n <ns> -l app.kubernetes.io/instance=<name>`.
 
 ## 8. Template Resync (ops ref §5)
 

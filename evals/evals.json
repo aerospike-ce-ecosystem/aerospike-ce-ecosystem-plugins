@@ -76,7 +76,7 @@
     {
       "id": 13,
       "prompt": "cluster-manager UI에서 Record browser 페이지가 500을 내는데 어디 repo에 이슈 올려야 돼?",
-      "expected_output": "bug-reporter skill triggers; routes to aerospike-cluster-manager repo (https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/issues/new); asks for browser+version, the failing URL path, browser console error, failing Network tab request/response, and screenshot or /api/v1/version output",
+      "expected_output": "bug-reporter skill triggers; routes to aerospike-cluster-manager repo (https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/issues/new); asks for browser+version, the failing URL path, browser console error, failing Network tab request/response, and screenshot, and the deployed api container image tag (cluster-manager exposes no version endpoint)",
       "files": []
     },
     {

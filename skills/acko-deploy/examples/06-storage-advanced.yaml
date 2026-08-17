@@ -14,7 +14,7 @@
 #
 # Verify:
 #   kubectl get asc aerospike-storage-advanced -n aerospike -w
-#   kubectl get pvc -n aerospike -l aerospike.io/cr-name=aerospike-storage-advanced
+#   kubectl get pvc -n aerospike -l app.kubernetes.io/instance=aerospike-storage-advanced
 #
 apiVersion: acko.io/v1alpha1
 kind: AerospikeCluster
