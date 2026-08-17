@@ -8,6 +8,7 @@ description: "MUST USE for building FastAPI/REST API applications with Aerospike
 ```python
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends
+from fastapi.responses import JSONResponse
 from aerospike_py import AsyncClient
 import aerospike_py
 
@@ -46,14 +47,14 @@ async def create(pk: str, body: dict, client: AsyncClient = Depends(get_client))
         await client.put((NS, SET, pk), body, policy={"exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY})
         return {"key": pk}
     except aerospike_py.RecordExistsError:
-        return JSONResponse(409, {"error": "already exists"})
+        return JSONResponse(status_code=409, content={"error": "already exists"})
 
 @app.get("/records/{pk}")
 async def read(pk: str, client: AsyncClient = Depends(get_client)):
     try:
         return (await client.get((NS, SET, pk))).bins      # NamedTuple attribute access
     except aerospike_py.RecordNotFound:
-        return JSONResponse(404, {"error": "not found"})
+        return JSONResponse(status_code=404, content={"error": "not found"})
 
 # update: same as create but policy={"exists": aerospike_py.POLICY_EXISTS_UPDATE_ONLY} -> RecordNotFound -> 404
 # delete: await client.remove((NS, SET, pk)) -> RecordNotFound -> 404
@@ -109,7 +110,7 @@ async def aerospike_error_handler(request, exc):
 @app.get("/health/ready")
 async def ready(client: AsyncClient = Depends(get_client)):
     # ping() does an info("build") round-trip; never raises -- returns False on failure.
-    return {"status": "ok"} if await client.ping() else JSONResponse(503, {"status": "unhealthy"})
+    return {"status": "ok"} if await client.ping() else JSONResponse(status_code=503, content={"status": "unhealthy"})
 
 @app.get("/health/live")
 async def live():
