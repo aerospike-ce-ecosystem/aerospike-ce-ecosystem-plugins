@@ -71,12 +71,19 @@ jobs:
           echo "next_version=${NEXT}" >> "$GITHUB_OUTPUT"
           echo "Bumping ${LATEST_TAG} → ${NEXT}"
 
-      # VERSIONING.md step 1: the manifest version is updated before the tag is
-      # created, so the tag points at a commit whose plugin.json already matches.
-      # Pushing before `gh release create --target main` also keeps this commit
-      # inside the new tag, so it does not trigger another release tomorrow.
+      # Writes VERSIONING.md step 1 (manifest version) before the tag is created,
+      # so the tag points at a commit whose plugin.json already matches. Pushing
+      # before `gh release create --target main` also keeps this commit inside the
+      # new tag, so it does not trigger another release tomorrow.
+      #
+      # This step must never block the release: releasing with a stale manifest is
+      # a cosmetic defect, releasing nothing is an outage. Every failure path here
+      # warns and returns success, and `continue-on-error` covers the unexpected.
+      # The `github.ref` guard keeps a `workflow_dispatch` from a side branch from
+      # fast-forwarding main onto that branch.
       - name: Sync plugin manifest version
-        if: steps.changes.outputs.skip == 'false'
+        if: steps.changes.outputs.skip == 'false' && github.ref == 'refs/heads/main'
+        continue-on-error: true
         run: |
           # plugin.json records bare semver; git tags carry the 'v' prefix.
           MANIFEST_VERSION="${{ steps.version.outputs.next_version }}"
@@ -94,8 +101,21 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .claude-plugin/plugin.json
           git commit -m "chore(release): sync plugin.json to ${MANIFEST_VERSION}"
-          git push origin HEAD:main
-          echo "plugin.json → ${MANIFEST_VERSION}"
+
+          # main may have moved since checkout. Rebase and retry, then give up
+          # rather than fail: the release matters more than the manifest.
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              echo "plugin.json → ${MANIFEST_VERSION}"
+              exit 0
+            fi
+            echo "Push rejected on attempt ${attempt}; rebasing onto origin/main."
+            git fetch origin main || break
+            git rebase origin/main || { git rebase --abort || true; break; }
+          done
+
+          echo "::warning::plugin.json not synced to ${MANIFEST_VERSION} (push to main failed). Releasing anyway; the next run retries."
+          exit 0
 
       - name: Generate release notes with Claude
         if: steps.changes.outputs.skip == 'false'
