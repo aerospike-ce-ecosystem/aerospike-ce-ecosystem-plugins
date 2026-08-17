@@ -39,7 +39,7 @@ Use `ping()` for **readiness**, not liveness:
 
 ### FastAPI readiness example
 
-For the `client.ping()`-driven `/health/ready` route (with `Depends(get_client)` and the `JSONResponse(503, …)` unhealthy path) and the matching K8s `readinessProbe` / `livenessProbe` manifest snippet, see the `aerospike-py-fastapi` skill — it carries the same pattern with the rest of the FastAPI wiring.
+For the `client.ping()`-driven `/health/ready` route (with `Depends(get_client)` and the `JSONResponse(status_code=503, …)` unhealthy path) and the matching K8s `readinessProbe` / `livenessProbe` manifest snippet, see the `aerospike-py-fastapi` skill — it carries the same pattern with the rest of the FastAPI wiring.
 
 ---
 
