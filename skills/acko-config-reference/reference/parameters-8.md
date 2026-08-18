@@ -29,7 +29,7 @@ When `enableDynamicConfigUpdate: true` is set in the CR, the operator uses these
 ```bash
 # asinfo commands
 asinfo -v "set-config:context=service;batch-index-threads=16"
-asinfo -v "set-config:context=namespace;id=ns1;max-record-size=256K"
+asinfo -v "set-config:context=namespace;id=ns1;nsup-period=60"
 
 # asadm commands
 asadm -e 'enable; manage config service param proto-fd-max to 100000'

@@ -36,7 +36,8 @@ Set `spec.enableDynamicConfigUpdate: true`, then patch the config value. The ope
 - **Removing** a key always forces a rolling restart (revert-to-default is not expressible as `set-config`). `replication-factor` (and legacy `memory-size`) are never dynamic — they cold-restart.
 - **ConfigDegraded** (apply AND rollback both failed): reconciliation **halts** with `ConfigDegradedSkip` Warning events (~60s requeue) until you intervene — revert the offending value, then cold-restart pods / reset the phase. Do NOT toggle `enableDynamicConfigUpdate`. Full recovery flow: `acko-debugging` skill.
 
-Common dynamic params: `proto-fd-max`, `max-record-size`, `stop-writes-sys-memory-pct`, `evict-used-pct`, `evict-tenths-pct`, `nsup-period`.
+Common dynamic params: `proto-fd-max`, `stop-writes-sys-memory-pct`, `nsup-period`, `batch-index-threads`, `migrate-threads`, `default-ttl`.
+NOT dynamic despite reading like tuning knobs: `max-record-size`, `evict-used-pct`, `evict-tenths-pct` — absent from the operator's allowlist (`internal/configdiff/dynamic_params.go`), so editing one cold-restarts the pods. Full list: `acko-config-reference` → `parameters-8.md`.
 
 ## 4. Warm / Cold Restart — spec.operations (ops ref §3)
 
