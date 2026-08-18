@@ -25,7 +25,7 @@ kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"size":5}}'
 kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"image":"aerospike:ce-8.1.1.1"}}'
 ```
 
-`RollingRestart` → `Completed`. Batch control: `spec.rollingUpdateBatchSize` (int or `"25%"`), per-rack override `rackConfig.rollingUpdateBatchSize`. Besides image/static config, editing `spec.podService` or `spec.aerospikeNetworkPolicy` also rolls pods (pod-spec hash).
+`RollingRestart` → `Completed`. Batch control: `spec.rollingUpdateBatchSize` (**integer only** — `*int32`, min 1; a percentage string is rejected by the API server), per-rack override `rackConfig.rollingUpdateBatchSize` (`IntOrString` — integer **or** percentage like `"50%"`). Besides image/static config, editing `spec.podService` or `spec.aerospikeNetworkPolicy` also rolls pods (pod-spec hash).
 
 ## 3. Dynamic Config Update — 2-Phase Commit (ops ref §2)
 
@@ -48,7 +48,7 @@ spec:
       # podList: ["<cluster>-0-0"]   # optional: specific pods
 ```
 
-Webhook-enforced: `kind` ∈ {`WarmRestart`, `PodRestart`}; one operation at a time; the list (incl. `podList`) cannot change while one is `InProgress` (`"cannot change operations while operation \"ID\" is InProgress"`). Controller: op ends `phase=Error` on unknown kind / nonexistent pod; batches gate on the readiness/migration guard and honor `rackConfig.rollingUpdateBatchSize`. Check `status.operationStatus`; clean up (or unstick — §10) with:
+`kind` ∈ {`WarmRestart`, `PodRestart`} is enforced by the CRD enum (API server), not the webhook. Webhook-enforced: one operation at a time; the list (incl. `podList`) cannot change while one is `InProgress` (`"cannot change operations while operation \"ID\" is InProgress"`). Controller: op ends `phase=Error` on unknown kind / nonexistent pod; batches gate on the readiness/migration guard and honor `rackConfig.rollingUpdateBatchSize`. Check `status.operationStatus`; clean up (or unstick — §10) with:
 
 ```bash
 kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"operations":null}}'

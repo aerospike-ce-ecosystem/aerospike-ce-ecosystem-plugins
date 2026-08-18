@@ -99,7 +99,7 @@ Used by: `Query.results()`, `Query.foreach()`
 |-----|------|---------|-------------|
 | socket_timeout | int | 30000 | Socket timeout (ms) |
 | total_timeout | int | 0 | Total timeout (0 = no limit) |
-| max_retries | int | 2 | Max retry attempts |
+| max_retries | int | 5 | Max retry attempts |
 | sleep_between_retries | int | 0 | Sleep between retries (ms) |
 | max_records | int | 0 | Max records to return (0 = all) |
 | records_per_second | int | 0 | Rate limit (0 = unlimited) |
@@ -117,7 +117,7 @@ Used by: all `admin_*` methods, index operations, `truncate()`
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| timeout | int | 1000 | Admin operation timeout (ms) |
+| timeout | int | 0 | Admin operation timeout (ms). `0` means "unset" and the client substitutes **3000 ms** — `AdminPolicy` derives `Default` on a bare `u32`, and `AdminPolicy::timeout()` returns `3_000` when the field is `0`. |
 
 ---
 

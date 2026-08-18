@@ -123,9 +123,9 @@ status:
 
 ```yaml
 spec:
-  rollingUpdateBatchSize: 1             # Global (integer or "25%")
+  rollingUpdateBatchSize: 1             # Global — INTEGER ONLY (*int32, min 1)
   rackConfig:
-    rollingUpdateBatchSize: "50%"       # Per-rack override
+    rollingUpdateBatchSize: "50%"       # Per-rack override — integer OR percentage
 ```
 
 ### What triggers a rolling (cold) restart
