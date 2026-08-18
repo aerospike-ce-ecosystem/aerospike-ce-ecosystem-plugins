@@ -42,6 +42,10 @@ import torch
 
 _FEATURE_DTYPE = np.dtype([("score", "f4"), ("count", "i4")])  # cache at module level
 
+# Load once at startup — a real app reads these from a checkpoint.
+MODEL_W = torch.zeros(len(_FEATURE_DTYPE.names), dtype=torch.float32)
+MODEL_B = torch.zeros(1, dtype=torch.float32)
+
 @app.post("/records:predict")
 async def predict(req: BatchReadReq, client: AsyncClient = Depends(get_client)):
     keys = [(NS, SET, k) for k in req.keys]
@@ -49,7 +53,23 @@ async def predict(req: BatchReadReq, client: AsyncClient = Depends(get_client)):
     np_batch = lazy_records.to_numpy(_FEATURE_DTYPE)    # GIL released during fill
     matrix = torch.from_numpy(np.column_stack([
         np_batch.batch_records[name] for name in _FEATURE_DTYPE.names
-    ]))                                                 # O(1) buffer share
+    ]))                                                 # column_stack COPIES (see note)
     scores = (matrix @ MODEL_W + MODEL_B).tolist()
     return {"scores": scores}
 ```
+
+**`np.column_stack` is not zero-copy.** `torch.from_numpy` shares the buffer, but the
+`column_stack` feeding it allocates a new contiguous array first, and it promotes mixed field
+dtypes to a common type — `f4` + `i4` becomes `float64`, doubling the memory and silently
+changing the precision the model sees:
+
+```python
+>>> dt = np.dtype([("score", "f4"), ("count", "i8")])
+>>> out = np.column_stack([a[n] for n in dt.names])
+>>> out.dtype, np.shares_memory(out, a)
+(dtype('float64'), False)
+```
+
+If the copy matters, build the matrix at the dtype you want and fill it column-wise
+(`np.empty((n, k), dtype=np.float32)` then assign each column), so the promotion happens once at
+a type you chose rather than implicitly at `float64`.
