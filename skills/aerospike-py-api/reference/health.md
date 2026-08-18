@@ -61,4 +61,6 @@ If the cluster has gone fully unreachable but the tend interval has not yet elap
 
 ## Tuning timeouts
 
-`ping()` honors the client's default operation timeouts. To bound probe latency tightly, configure the client with a short `operation_queue_timeout_ms` and a short `total_timeout` policy. A failed `ping()` typically returns within a few hundred milliseconds; readiness probes with `periodSeconds: 5` give the client time to recover from a transient blip without flapping out of the Service.
+**`ping()` is not tunable.** `do_ping` (`rust/src/client_ops.rs:525-532`) picks a random node and calls `node.info(&AdminPolicy::default(), &["build"])` — the policy is constructed inline, so neither `operation_queue_timeout_ms` nor any `total_timeout` policy reaches it, and no limiter permit is acquired. Its bound is the `AdminPolicy` default: the field is `0`, which `AdminPolicy::timeout()` substitutes with **3000 ms**.
+
+Size readiness probes around that 3 s ceiling rather than trying to shorten it — `periodSeconds: 5` with a `timeoutSeconds` above 3 gives the client room to ride out a transient blip without flapping out of the Service. To bound probe latency more tightly than 3 s, use a real read against a known key instead of `ping()`.
