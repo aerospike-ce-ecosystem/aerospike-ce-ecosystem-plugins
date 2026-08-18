@@ -14,6 +14,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      pull-requests: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -84,6 +85,8 @@ jobs:
       - name: Sync plugin manifest version
         if: steps.changes.outputs.skip == 'false' && github.ref == 'refs/heads/main'
         continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # plugin.json records bare semver; git tags carry the 'v' prefix.
           MANIFEST_VERSION="${{ steps.version.outputs.next_version }}"
@@ -114,7 +117,43 @@ jobs:
             git rebase origin/main || { git rebase --abort || true; break; }
           done
 
-          echo "::warning::plugin.json not synced to ${MANIFEST_VERSION} (push to main failed). Releasing anyway; the next run retries."
+          # Reaching here means the push was refused for a reason a rebase does
+          # not fix. Since 2026-08-18 that reason is branch protection: the
+          # `protect-main` ruleset requires a pull request on the default branch
+          # and its only bypass actor is the admin repository role, which
+          # GITHUB_TOKEN does not hold. The retry loop above can therefore never
+          # succeed while that rule is active, and the old behaviour — warn and
+          # move on — let the manifest drift from the tag silently, which is the
+          # exact defect #88 was filed for.
+          #
+          # Fall back to a pull request. The branch name is fixed, so repeated
+          # releases force-update one PR in place rather than opening a new one
+          # every night. Only the default branch is protected, so this push is
+          # allowed. The release itself is still never blocked: every path here
+          # ends in `exit 0`.
+          BRANCH=chore/sync-plugin-manifest
+
+          if ! git push --force origin "HEAD:refs/heads/${BRANCH}"; then
+            echo "::warning::plugin.json not synced to ${MANIFEST_VERSION}: pushing ${BRANCH} failed too."
+            exit 0
+          fi
+
+          if gh pr view "${BRANCH}" --json number >/dev/null 2>&1; then
+            gh pr edit "${BRANCH}" --title "chore(release): sync plugin.json to ${MANIFEST_VERSION}" || true
+            echo "::warning::plugin.json on main is stale; updated the open ${BRANCH} PR to ${MANIFEST_VERSION}."
+          else
+            gh pr create --base main --head "${BRANCH}" \
+              --title "chore(release): sync plugin.json to ${MANIFEST_VERSION}" \
+              --body "$(printf '%s\n' \
+                "\`.claude-plugin/plugin.json\` records the plugin version that Claude Code reads at install time, so it has to match the release tag." \
+                "" \
+                "The daily release job used to commit this bump straight to \`main\`. Branch protection now requires a pull request there, and \`GITHUB_TOKEN\` is not a bypass actor, so the job opens this PR instead." \
+                "" \
+                "Merging it is the whole fix; the next release force-updates this same branch rather than opening another PR." \
+                "" \
+                "Refs #88.")" || true
+            echo "::warning::plugin.json on main is stale; opened a ${BRANCH} PR for ${MANIFEST_VERSION}."
+          fi
           exit 0
 
       - name: Generate release notes with Claude
