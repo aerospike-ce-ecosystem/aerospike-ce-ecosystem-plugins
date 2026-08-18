@@ -52,7 +52,7 @@ Each condition has `type`, `status` (`True`/`False`/`Unknown`), `reason`, `messa
 | `MigrationComplete` | no data migrations pending |
 | `ReconciliationPaused` | `spec.paused: true` in effect |
 | `ReconcileHealthy` | `False` = circuit broken (reasons `PermanentError`, `Recovered`) |
-| `DynamicConfigDegraded` | pods hold inconsistent dynamic config (reasons `RollbackFailed`, `ApplyFailed`) |
+| `DynamicConfigDegraded` | pods hold inconsistent dynamic config (sole reason: `RollbackFailed` — `reconciler_status.go:800-801` is the only setter) |
 
 ### `ConfigApplied`
 
@@ -81,9 +81,11 @@ Each `AerospikePodStatus.dynamicConfigChanges[]` entry tracks one config path mu
 | `path` | string | Dotted config path, e.g. `service.proto-fd-max` |
 | `oldValue` | string | Previous value (TOML-rendered) |
 | `newValue` | string | Attempted new value |
-| `result` | enum | `Applied`, `Failed`, `Pending`, `RolledBack`, `RollbackFailed` |
+| `result` | string | Only ever `Applied` — see the note below |
 
-Use this to debug which specific change failed in a 2PC rollout:
+**Only `Applied` is ever written.** `reconciler_dynamic_config.go:515` is the sole writer of `result` and hardcodes `"Applied"`, reached only on the success path; `:228` is the sole writer of `dynamicConfigStatus`, also literal `"Applied"`. `Failed`, `RolledBack` and `RollbackFailed` appear in the API doc-comment (`aerospikecluster_types.go:529`) but are never assigned, and `Pending` is not even in that list. A change that failed leaves **no entry at all** rather than a failure value — so absence, not a status string, is the signal. Diagnose failures from the `DynamicConfigDegraded` condition (reason `RollbackFailed`, `reconciler_status.go:800-801`), `status.phaseReason`, `phase=ConfigDegraded`, and `ConfigDegradedSkip` events.
+
+List the changes that *did* apply:
 
 ```bash
 kubectl get asc <name> -o jsonpath='{.status.pods[*].dynamicConfigChanges}' | jq

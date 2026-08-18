@@ -81,10 +81,15 @@ status:
         - path: namespaces.testns.default-ttl
           oldValue: "0"
           newValue: "3600"
-          result: RolledBack       # phase 2 apply failed -> LIFO rollback succeeded
+          result: Applied
 ```
 
-Per-change `result` enum: `Applied`, `Failed`, `Pending`, `RolledBack`, `RollbackFailed`.
+**`result` is only ever `Applied`.** `reconciler_dynamic_config.go:515` is the sole writer and
+hardcodes it on the success path. `Failed`, `RolledBack` and `RollbackFailed` appear in the API
+doc-comment (`aerospikecluster_types.go:529`) but are never assigned; `Pending` is not even in
+that list. A path that failed to apply is **absent** from the list rather than carrying a failure
+value, so diagnose from the `DynamicConfigDegraded` condition (reason `RollbackFailed`),
+`status.phaseReason`, and `ConfigDegradedSkip` events instead.
 
 Inspect with:
 

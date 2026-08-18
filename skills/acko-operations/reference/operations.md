@@ -90,12 +90,14 @@ kubectl get asc <name> -n <ns> -o jsonpath='{.status.pods[*].dynamicConfigChange
 kubectl get asc <name> -o jsonpath='{.status.pods}' | jq '.[].dynamicConfigStatus'
 ```
 
-Per-change `result` enum: `Applied`, `Failed`, `Pending`, `RolledBack`, `RollbackFailed`.
+**Per-change `result` is only ever `Applied`.** `reconciler_dynamic_config.go:515` is the sole writer and hardcodes it on the success path; `:228` writes `dynamicConfigStatus` the same way. `Failed`, `RolledBack` and `RollbackFailed` are listed in the API doc-comment (`aerospikecluster_types.go:529`) but never assigned, and `Pending` is not even in that list. So a change that did not apply leaves **no entry**, not a failure value — absence is the signal.
 
-Top-level statuses:
-- `Applied`: Success (no restart needed)
-- `Failed`: Phase 1 validation rejected, OR phase 2 apply failed and rollback succeeded; set `enableDynamicConfigUpdate: false` to force rolling restart
-- `Pending`: Change is being applied
+To diagnose a change that did not take effect:
+- `DynamicConfigDegraded` condition, reason `RollbackFailed` (`reconciler_status.go:800-801`) — apply *and* rollback both failed
+- `status.phaseReason` — "Dynamic config rollback failed on pods: …"
+- `phase=ConfigDegraded` plus repeating `ConfigDegradedSkip` Warning events
+- the operator log — phase-1 validation failure is logged only, with no event and no status write
+- a non-dynamic parameter: set `enableDynamicConfigUpdate: false` to force a rolling restart
 
 **Removing** a config key (not just changing it) always forces a rolling restart, even for an otherwise-dynamic param — "revert to server default" cannot be expressed as `set-config`.
 
@@ -103,7 +105,9 @@ Top-level statuses:
 
 If phase 2 apply AND rollback both fail, the cluster enters `phase=ConfigDegraded` and `ConditionDynamicConfigDegraded=True`. Reconciliation then **halts** — the operator skips every reconcile with a `ConfigDegradedSkip` Warning (requeue ~60s) until you intervene: revert the offending value in the spec, then cold-restart the pods / reset the phase. Do not toggle `enableDynamicConfigUpdate` or re-apply the change during this window.
 
-Example status snapshot of a partial rollback:
+Example status snapshot. Note that the pod where the change did not apply carries **no**
+`dynamicConfigChanges` entry — the operator never writes a failure value, so this is what a
+partial rollout actually looks like:
 
 ```yaml
 status:
@@ -113,10 +117,8 @@ status:
         - { path: service.proto-fd-max, oldValue: "15000", newValue: "20000", result: Applied }
     cluster-1-1:
       dynamicConfigChanges:
-        - { path: service.proto-fd-max, oldValue: "15000", newValue: "20000", result: RolledBack }
-    cluster-1-2:
-      dynamicConfigChanges:
-        - { path: service.proto-fd-max, oldValue: "15000", newValue: "20000", result: Failed }
+        - { path: service.proto-fd-max, oldValue: "15000", newValue: "20000", result: Applied }
+    cluster-1-2: {}          # no entry — this is the pod to investigate
 ```
 
 ### Batch Size

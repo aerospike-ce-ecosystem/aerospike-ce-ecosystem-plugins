@@ -33,7 +33,7 @@ Execute in order; stop and report as soon as the root cause is identified. Comma
 3. **Pod-level issues** — logs via `ackoctl k8s cluster logs` or kubectl; for CrashLoopBackOff use `kubectl logs --previous` (ackoctl has no such flag). CrashLoopBackOff → config parse error (removed 7.x params), OOM, `data-size` < 512 MiB; ImagePullBackOff → image/pull-secret; Pending → resources/PVC.
 4. **Operator logs** — `kubectl -n aerospike-operator logs -l control-plane=controller-manager --tail=200`: reconcile errors, webhook rejections, resource-creation failures.
 5. **Events timeline** — `ackoctl k8s cluster events` (classified) or raw kubectl events. Key reasons: `CircuitBreakerActive` (→ `BackoffActive`, `acko_circuit_breaker_active=1`), `RestartFailed`, `ScaleDownDeferred`, `DynamicConfigStatusFailed`, `ACLSyncError`, `ConfigDegradedSkip`, `TemplateResolutionError`, `ReadinessGateBlocking`.
-6. **Dynamic config status** — `status.pods[].dynamicConfigStatus`; `Failed` = parameter not dynamic → advise `enableDynamicConfigUpdate: false` for a rolling restart.
+6. **Dynamic config status** — `status.pods[].dynamicConfigStatus` is only ever `Applied`; a change that did not take has **no** entry. Read the `DynamicConfigDegraded` condition (reason `RollbackFailed`) and the operator log — phase-1 validation failure is logged, not evented. Non-dynamic parameter → advise `enableDynamicConfigUpdate: false` for a rolling restart.
 
 ## Remediation actions
 
