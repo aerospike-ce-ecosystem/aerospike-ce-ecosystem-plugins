@@ -10,7 +10,7 @@ The webhook accumulates every failure and returns them as **one** error, joined 
 admission webhook "vaerospikecluster.kb.io" denied the request: validation failed: spec.size 9 exceeds CE maximum of 8; aerospikeConfig.namespaces count 3 exceeds CE maximum of 2
 ```
 
-When matching on these strings, match a **substring**, never the whole message: most contain `%q`/`%d` interpolations mid-string, and several rules fire together. The messages below are written with `N`/`M`/`T`/`"name"` standing in for those interpolations.
+When matching on these strings, match a **substring**, never the whole message: most contain `%q`/`%d` interpolations mid-string, and several rules fire together. The messages below are written with `N` / `M` / `T` / `S` / `KEY` / `FIELD` / `PATH` / `ID` / `"name"` / `'key'` / `(reason)` / `[...]` standing in for interpolated values.
 
 ---
 
@@ -44,7 +44,8 @@ Image tag parsing (#321) uses the last colon after the final `/` and strips `@sh
 | `logging` not a list | `"aerospikeConfig.logging must be a list"` |
 | `namespaces` a scalar (string/int/bool) | `"aerospikeConfig.namespaces must be a list of namespace maps (e.g. [{name: foo, ...}]), got T"` |
 | `namespaces` a map (keyed by name) | `"aerospikeConfig.namespaces must be a list of namespace maps ..., got map with N entries; per-namespace validation cannot run on the map form"` |
-| namespace entry not a map with `name` | `"aerospikeConfig.namespaces[N] must be a map with required key 'name'"` |
+| namespace entry not a map | `"aerospikeConfig.namespaces[N] must be a map, got T"` |
+| namespace entry map without a `name` key | `"aerospikeConfig.namespaces[N] is missing required 'name' key"` |
 | Duplicate namespace name | `"aerospikeConfig.namespaces[N]: duplicate namespace name \"name\"; each namespace must have a unique name"` |
 | Rack ID add+remove in single update (also fires when `rackConfig` is dropped entirely → implicit rack 0) | `"cannot add new rack IDs [...] and remove existing rack IDs [...] in the same update; please do this in two separate steps"` — when the implicit default rack (ID 0) is involved, the message instead explains that switching between the default rack and explicit racks recreates StatefulSets and risks data loss |
 | `metricLabels` value contains control chars | `"monitoring.metricLabels[\"key\"] value must not contain control characters"` |
@@ -168,7 +169,7 @@ A rack's `aerospikeConfig` is DeepMerged into the effective config, so it is val
 | Rule | Error Message |
 |------|--------------|
 | Port out of range | `"monitoring.port must be in range 1-65535"` |
-| Port conflicts with 3000-3003 | `"monitoring.port N conflicts with Aerospike service port"` |
+| Port conflicts with 3000-3003 | `"monitoring.port N conflicts with Aerospike S port"` — `S` is the reserved port's name: `service` (3000), `fabric` (3001), `heartbeat` (3002), `info` (3003) |
 | exporterImage empty when enabled | `"monitoring.exporterImage must not be empty when monitoring is enabled"` |
 | metricLabels **key** outside `^[A-Za-z0-9_-]+$` | `"monitoring.metricLabels key \"k\" must contain only ASCII letters, digits, dashes, and underscores"` |
 | customRules missing name/rules | `"monitoring.prometheusRule.customRules[N]: missing required field 'name'"` / `"... missing required field 'rules'"` |
@@ -176,7 +177,7 @@ A rack's `aerospikeConfig` is DeepMerged into the effective config, so it is val
 | customRules `name` not a string / empty | `"monitoring.prometheusRule.customRules[N]: field 'name' must be a string, got T"` / `"... must not be empty"` |
 | customRules `rules` not a JSON array / empty array | `"monitoring.prometheusRule.customRules[N]: field 'rules' must be a JSON array, got T"` / `"... must contain at least one rule"` |
 | `serviceMonitor.interval` not a Prometheus duration (e.g. `"5 seconds"`) | `"monitoring.serviceMonitor.interval \"...\" is not a valid Prometheus duration ..."` |
-| Invalid K8s label on `serviceMonitor.labels`/`prometheusRule.labels` | `"monitoring.serviceMonitor.labels key \"k\" is not a valid Kubernetes label key: ..."` / `"...labels[\"k\"] value \"v\" is not a valid Kubernetes label value: ..."` |
+| Invalid K8s label on `serviceMonitor.labels`/`prometheusRule.labels` | `"PATH key \"k\" is not a valid Kubernetes label key: ..."` / `"PATH[\"k\"] value \"v\" is not a valid Kubernetes label value: ..."` — `PATH` is the dotted CR path the caller passes, i.e. `monitoring.serviceMonitor.labels` or `monitoring.prometheusRule.labels` |
 
 These are validated because the reconciler copies them verbatim onto the ServiceMonitor/PrometheusRule; the Prometheus Operator / API server would otherwise reject them at apply time, leaving monitoring silently broken.
 
