@@ -15,6 +15,9 @@ Per-release notes are also auto-published to [GitHub Releases](https://github.co
 
 ### Fixed
 
+- Corrected `status.operation` to `status.operationStatus` in the three remaining `acko-operations` sites (`diagnostic-commands.md`, `troubleshooting.md`, `operations.md`). #102 fixed the `cr-spec-fields.md` table rows but not these; the CRD has no `operation` field under `status`, so the documented `jsonpath` printed nothing and exited 0 — indistinguishable from "no operation in flight".
+- Corrected two webhook error strings in `validation-rules.md` that are not substrings of what the webhook prints: the `deleteLocalStorageOnRestart` message omitted both `storage.` prefixes and its trailing clause, and `templateRef` immutability is three distinct messages, none of which reads "cannot add/remove/change".
+- Marked three more interpolated arguments as placeholders rather than baking one possible value into the documented text: the reserved-port name in the `monitoring.port` conflict message, the CR path in the label-validation messages, and the polarity word in the `validateIntOrString` family.
 - Five event reasons in `acko-operations/reference/events.md` that the operator never emits: `DynamicConfigValidationFailed`, `DynamicConfigRollbackTriggered`, `DynamicConfigRollbackFailed`, `ClusterPaused`, and `ClusterResumed`. The real reasons are `DynamicConfigApplied`, `DynamicConfigRollback`, `DynamicConfigStatusFailed`, `ReconciliationPaused`, and `ReconciliationResumed` (`internal/controller/events.go`); phase-1 validation failure emits no event at all and is only logged, which the page now states.
 - `status.operation.*` → `status.operationStatus.*` in `acko-deploy/reference/cr-spec-fields.md` (3 sites). The CRD field is `operationStatus` (`aerospikecluster_types.go:441`), so the documented jsonpath returned nothing.
 
