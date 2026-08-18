@@ -27,6 +27,7 @@ Per-release notes are also auto-published to [GitHub Releases](https://github.co
 
 ### Removed
 
+- Deleted the label-triggered agent automation workflows: `.github/workflows/agent-implement.yml`, `issue-planner.yml`, and `pr-reviewer.yml`. `agent-implement.yml` took its instructions from an issue comment matched on `<!-- agent-plan-start -->` with no `author_association` check, so the plan it executed with `contents: write` did not have to come from a maintainer. The earlier "CI workflow prompts now reflect the nine-skill layout" entry (under Changed, above) describes edits to these now-deleted files; it is left as written because it records what happened at the time. See `aerospike-ce-ecosystem/project-hub#158`.
 - Deleted the unused `.mcp.json` placeholder left by the retired `acm-mcp-init` MCP integration.
 
 ## [1.4.4] - 2026-05-17
