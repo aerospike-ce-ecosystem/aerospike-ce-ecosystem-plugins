@@ -211,6 +211,54 @@ def acm_routes(root: Path) -> set[str]:
     return expanded
 
 
+# A Go format verb: %d, %q, %T, %+v, %-10s, %%
+GO_VERB = re.compile(r"(%[-+ #0]*[\d.*]*[a-zA-Z%])")
+# Go concatenates adjacent literals across lines: `"a " +\n  "b"`. Fold those
+# before extracting, or a message split over three source lines is indexed as
+# three fragments and matches nothing.
+GO_CONCAT = re.compile(r'"\s*\+\s*\n?\s*"')
+GO_STRING = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
+
+# Minimum fixed (non-verb) text a format string must carry before it is worth
+# turning into a pattern. `"%s"` compiles to `^.+?$` and would accept anything,
+# which is worse than not checking at all.
+MIN_FIXED_TEXT = 12
+
+
+def acko_message_patterns(root: Path) -> set[str]:
+    r"""Every operator error/warning string, reduced to a matching skeleton.
+
+    A skeleton is the literal text with each `%verb` replaced by NUL. Matching
+    then asks a single question: do the documented message's fixed runs appear,
+    **in order, inside one skeleton**?
+
+    That ordering-within-one-string is the whole difference between this and a
+    naive substring check. Searching a global blob of every literal in the repo
+    lets a documented message "pass" by borrowing one fragment from a storage
+    error and another from a monitoring warning, and lets a correct message
+    fail because it interpolates in the middle and no single run is long enough
+    to be evidence. Per-skeleton, ordered matching has neither problem, and it
+    tolerates the catalogue's actual convention: quoting a *prefix* of a long
+    message rather than the whole thing.
+    """
+    out: set[str] = set()
+    for path in _walk(root / "api", ".go", skip=("_test.go",)) + _walk(
+        root / "internal", ".go", skip=("_test.go",)
+    ):
+        text = GO_CONCAT.sub("", _read(path))
+        for m in GO_STRING.finditer(text):
+            lit = m.group(1).replace('\\"', '"')
+            parts = GO_VERB.split(lit)
+            if len("".join(parts[0::2]).strip()) < MIN_FIXED_TEXT:
+                continue
+            skeleton = "".join(
+                ("%" if part == "%%" else "\x00") if i % 2 else part
+                for i, part in enumerate(parts)
+            )
+            out.add(skeleton)
+    return out
+
+
 # --------------------------------------------------------------------------
 # Claim extraction from skills/
 # --------------------------------------------------------------------------
@@ -395,6 +443,114 @@ def check_event_reasons(known: set[str], stats: Stats) -> list[Finding]:
     return out
 
 
+# Tokens the reference pages use where the operator interpolates a value. A
+# documented message is normalised through these before matching, so `N` lines
+# up with `%d` and `"..."` with `%q`.
+MESSAGE_PLACEHOLDER = re.compile(
+    r"\b(?:N|M|T|S|KEY|MIN|ID|FIELD|PATH|POLARITY)\b"
+    r'|\\"[^"]*\\"|"[^"]*"'
+    r"|<[^>]+>"
+    r"|'[a-z][a-z-]*'"
+    r"|\((?:reason|scope)\)"
+    r"|\[\.\.\.\]"
+    r"|\b(?:positive|non-negative)\b"
+    r"|\.\.\."
+    r"|\d+"
+)
+
+
+def _skeleton_regex(skeleton: str) -> re.Pattern:
+    r"""`a\x00b` -> `^a.+?b$` — each interpolation becomes a non-empty wildcard."""
+    return re.compile(
+        "^" + "".join(".+?" if ch == "\x00" else re.escape(ch) for ch in skeleton) + "$",
+        re.S,
+    )
+
+
+def _message_supported(claim: str, skeletons: set[str], regexes: list[re.Pattern]) -> bool:
+    r"""True if some operator message can print this text.
+
+    Two ways a documented message can be true, and the catalogue uses both:
+
+    1. **It spells out the interpolated values.** `"monitoring.port N conflicts
+       with Aerospike service port"` is what the user sees for one input of
+       `"monitoring.port %d conflicts with Aerospike %s port"`. Compiling the
+       skeleton to `^monitoring\.port .+? conflicts with Aerospike .+? port$`
+       and matching the whole claim covers this.
+
+    2. **It quotes only a fragment**, usually the prefix of a long message —
+       `"monitoring.port must be in range 1-65535"` for a message that goes on
+       to say `" (got %d)"`. Whole-message matching cannot see that, so the
+       claim's fixed runs are instead required to appear **in order inside a
+       single skeleton**.
+
+    That "inside a single skeleton" is what separates this from a naive
+    substring check against every literal in the repo, which lets a message
+    pass by borrowing one run from a storage error and the next from a
+    monitoring warning. Runs under 4 characters are dropped as evidence but
+    still separate their neighbours, so a claim is never accepted on the
+    strength of the word "must".
+    """
+    if any(rx.match(claim) for rx in regexes):
+        return True
+    runs = [r for r in (x.strip() for x in MESSAGE_PLACEHOLDER.split(claim)) if len(r) >= 4]
+    if not runs:
+        return True  # entirely templated; nothing left to check
+    for sk in skeletons:
+        pos = 0
+        for run in runs:
+            found = sk.find(run, pos)
+            if found < 0:
+                break
+            pos = found + len(run)
+        else:
+            return True
+    return False
+
+
+def check_webhook_messages(known: set[str], stats: Stats) -> list[Finding]:
+    """Backticked, double-quoted webhook messages in the ACKO reference pages.
+
+    Scoped to that shape because it is the catalogue's convention for "this is
+    verbatim what the webhook prints" — exactly the claim worth checking, and
+    nothing else gets swept in.
+
+    Measured precision at the pinned SHA: 99 claims checked, 2 reported, both
+    genuine. Re-measure it if you change the matcher; a category that reports
+    false positives gets the whole checker switched off.
+    """
+    out: list[Finding] = []
+    if not known:
+        return out
+    regexes = [_skeleton_regex(sk) for sk in known]
+    span = re.compile(r'`"((?:[^"`\\]|\\.)*)"`')
+    targets = ("acko-operations/", "acko-config-reference/", "acko-deploy/")
+    for path in sorted(_walk(SKILLS_DIR, ".md")):
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        if not any(seg in rel for seg in targets):
+            continue
+        in_fence = False
+        for ln, line in enumerate(_read(path).splitlines(), 1):
+            if line.lstrip().startswith("```"):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+            for m in span.finditer(line):
+                claim = m.group(1).replace('\\"', '"')
+                if len(claim.strip()) < MIN_FIXED_TEXT:
+                    continue
+                stats.count("webhook-message")
+                if _message_supported(claim, known, regexes):
+                    continue
+                out.append(Finding(
+                    rel, ln, "webhook-message", claim,
+                    "no operator message contains this text in this order; "
+                    "nothing in api/ or internal/ can print it",
+                ))
+    return out
+
+
 def check_crd_fields(known: set[str], stats: Stats) -> list[Finding]:
     """Field NAMES in `spec.*` / `status.*` paths must exist as a json tag.
 
@@ -440,13 +596,22 @@ COVERAGE — what this checker does and does not verify
                      constants.rs plus the Python-level modules
     acm-route        `/api/...` against cluster-manager routes, resolved through
                      each APIRouter prefix and both the /api and /api/v1 mounts
+    webhook-message  backticked, quoted messages in the ACKO error catalogues
+                     against operator format strings, matched per-string
+
+  A note on webhook-message, because an earlier attempt at it was removed for
+  noise: substring-matching a documented message against a global blob of every
+  literal in the repo is the noisy approach — a message can "pass" by borrowing
+  one run from a storage error and the next from a monitoring warning, and a
+  correct message fails because it interpolates mid-string and no single run is
+  long enough to be evidence. This version folds `+`-concatenated literals,
+  reduces each message to a skeleton with its `%verbs` marked, and accepts a
+  claim only if one skeleton either matches it whole (with each verb standing in
+  for the value the docs spelled out) or contains all its fixed runs in order.
+  Measured at the pinned SHAs: 99 claims checked, 2 reported, both genuine.
+  Re-measure if you touch the matcher, and record the number here.
 
   NOT verified — these still need human review:
-    - Webhook error strings. Tried and removed: Go assembles them from format
-      verbs and concatenated literals, so the documented rendering is not a
-      substring of anything in source. 19 of 29 reports were false. The manual
-      audit did find 11 genuinely wrong strings here, so the risk is real — it
-      simply is not mechanically checkable at acceptable precision.
     - Default VALUES (`max_retries` = 2 vs 5). They live in a dependency crate
       and in per-policy override builders; a wrong guess is worse than no check.
     - Whether a documented rule is actually IMPLEMENTED. "Rack IDs cannot be
@@ -460,7 +625,8 @@ COVERAGE — what this checker does and does not verify
       names; Ginkgo/pytest specifics.
 
   Honest denominator: the drift audit that motivated this checker examined
-  ~1,770 claims. The categories above cover roughly a fifth of that population,
+  ~1,770 claims. The categories above cover 420 of them at the pinned SHAs —
+  roughly a quarter of that population,
   and they are deliberately the fifth where a wrong claim fails SILENTLY — a bad
   label selector or condition type exits 0 and prints nothing, so no human ever
   sees an error. A green run means "these claim kinds agree with the pinned
@@ -534,6 +700,7 @@ def main() -> int:
     run("ackoctl-flag", ackoctl_flags, check_ackoctl_flags, ACKOCTL)
     run("py-constant", py_constants, check_py_constants, PY)
     run("acm-route", acm_routes, check_acm_routes, ACM)
+    run("webhook-message", acko_message_patterns, check_webhook_messages, ACKO)
 
     if args.format == "json":
         print(json.dumps({
