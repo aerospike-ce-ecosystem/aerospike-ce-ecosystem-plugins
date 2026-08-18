@@ -20,7 +20,7 @@
 #   kubectl patch asc aerospike-basic -n aerospike --type=merge --patch-file=09-operations.yaml
 #
 # Watch progress:
-#   kubectl get asc aerospike-basic -n aerospike -o jsonpath='{.status.operation}' | jq
+#   kubectl get asc aerospike-basic -n aerospike -o jsonpath='{.status.operationStatus}' | jq
 #
 # Verify warm restart (uptime resets but pod did NOT restart):
 #   kubectl exec -n aerospike aerospike-basic-0-0 -c aerospike-server -- asinfo -v uptime
@@ -41,7 +41,7 @@ spec:
   # the apply with "only one operation can be specified at a time" if you
   # uncomment a variant below without deleting the active block above.
   # Also: you cannot modify spec.operations[] while the current op has
-  # status.operation.phase = InProgress. Wait for it to complete or fail.
+  # status.operationStatus.phase = InProgress. Wait for it to complete or fail.
   # ============================================================================
   # ---- Variants (uncomment ONE, after deleting the active block above) ----
 

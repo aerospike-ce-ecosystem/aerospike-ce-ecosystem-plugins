@@ -138,7 +138,7 @@ Besides `image` and static `aerospikeConfig` changes, editing `spec.podService` 
 
 ## 3. On-Demand Restart
 
-Only one operation at a time. Remove from spec after completion. Batches gate on the same readiness-gate / migration guard as rolling restarts (a batch may pause until pods rejoin or migrations drain) and honor `rackConfig.rollingUpdateBatchSize` with the same precedence as rolling restarts. The op goes to `status.operation.phase=Error` (not silent Completed) on an unknown `kind` or when `podList` names no existing pod.
+Only one operation at a time. Remove from spec after completion. Batches gate on the same readiness-gate / migration guard as rolling restarts (a batch may pause until pods rejoin or migrations drain) and honor `rackConfig.rollingUpdateBatchSize` with the same precedence as rolling restarts. The op goes to `status.operationStatus.phase=Error` (not silent Completed) on an unknown `kind` or when `podList` names no existing pod.
 
 ### WarmRestart (SIGUSR1)
 
