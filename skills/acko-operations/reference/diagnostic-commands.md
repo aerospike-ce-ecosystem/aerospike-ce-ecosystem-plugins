@@ -47,5 +47,5 @@ kubectl get events -n <ns> --field-selector reason=TemplateDrifted
 kubectl get pvc -n <ns> -l app.kubernetes.io/instance=<name>
 
 # ===== Operation Status =====
-kubectl get asc <name> -n <ns> -o jsonpath='{.status.operation}' | jq .   # phase, completedPods, failedPods
+kubectl get asc <name> -n <ns> -o jsonpath='{.status.operationStatus}' | jq .   # id, kind, phase, completedPods, failedPods
 ```

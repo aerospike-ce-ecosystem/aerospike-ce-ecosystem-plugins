@@ -8,7 +8,7 @@ Canonical catalog of ACKO webhook validation errors and non-blocking warnings. T
 validation failed: <error>; <error>; …
 ```
 
-(`aerospikecluster_webhook.go:643`; the template webhook uses `template validation failed: …`, `aerospikeclustertemplate_webhook.go:197`.) So the strings below are **substrings** of what `kubectl apply` prints, never the whole message — match on a fragment, not on equality. Placeholders shown as `N`, `T`, `"..."` are Go format verbs (`%d`, `%T`, `%q`) filled in at rejection time.
+(`aerospikecluster_webhook.go:643`; the template webhook uses `template validation failed: …`, `aerospikeclustertemplate_webhook.go:197`.) So the strings below are **substrings** of what `kubectl apply` prints, never the whole message — match on a fragment, not on equality. Placeholders shown as `N`, `M`, `T`, `S`, `KEY`, `FIELD`, `PATH`, `POLARITY`, `ID`, `"..."` are Go format verbs (`%d`, `%T`, `%s`, `%q`, `%v`) filled in at rejection time — a documented message is never literally what you read, only its fixed runs are.
 
 ---
 
@@ -123,7 +123,7 @@ Privilege format: `"<code>"` / `"<code>.<namespace>"` / `"<code>.<namespace>.<se
 | Rack ID <= 0 | `"rack ID must be > 0, got N (rack ID 0 is reserved for the default rack)"` |
 | Duplicate Rack ID | `"duplicate rack ID N"` |
 | Duplicate rackLabel | `"duplicate rackLabel \"label\""` |
-| Invalid IntOrString | `"rackConfig.scaleDownBatchSize must be a positive integer or a percentage string (e.g., \"25%\"); got \"...\""` |
+| Invalid IntOrString | `"rackConfig.FIELD must be a POLARITY integer or a percentage string (e.g., \"25%\"); got \"...\""` — `FIELD` is `scaleDownBatchSize` / `maxIgnorablePods` / `rollingUpdateBatchSize`; `POLARITY` is `positive` for all but `maxIgnorablePods`, which says `non-negative` |
 | More racks than `spec.size` | `"rackConfig defines N racks but spec.size is M; each rack must get at least 1 pod, so the rack count must not exceed spec.size"` (skipped when size deferred to templateRef) |
 | Per-rack `aerospikeConfig` override violates a CE constraint | `"rackConfig.racks[id=N].aerospikeConfig: <inner CE error>"` |
 
@@ -151,21 +151,21 @@ A rack's `aerospikeConfig` is DeepMerged into the effective config, so it is val
 | PV size empty/invalid/negative | `"persistentVolume.size must not be empty"` / `"is not a valid Kubernetes quantity"` |
 | Path not absolute | `"aerospike.path must be an absolute path"` |
 | subPath + subPathExpr both set | `"subPath and subPathExpr are mutually exclusive"` |
-| deleteLocalStorageOnRestart + empty localStorageClasses | `"deleteLocalStorageOnRestart is true but localStorageClasses is empty"` |
+| deleteLocalStorageOnRestart + empty localStorageClasses | `"storage.deleteLocalStorageOnRestart is true but storage.localStorageClasses is empty; specify which storage classes are local"` |
 
 ### Monitoring Validation
 
 | Rule | Error Message |
 |------|--------------|
 | Port out of range | `"monitoring.port must be in range 1-65535"` |
-| Port conflicts with 3000-3003 | `"monitoring.port N conflicts with Aerospike service port"` |
+| Port conflicts with 3000-3003 | `"monitoring.port N conflicts with Aerospike S port"` — `S` is the reserved port's name: `service` (3000), `fabric` (3001), `heartbeat` (3002), `info` (3003) |
 | exporterImage empty when enabled | `"monitoring.exporterImage must not be empty when monitoring is enabled"` |
 | metricLabels key outside `^[A-Za-z0-9_-]+$` | `"monitoring.metricLabels key \"k\" must contain only ASCII letters, digits, dashes, and underscores"` |
 | customRules missing `name` or `rules` | `"monitoring.prometheusRule.customRules[N]: missing required field 'name'"` / `"... missing required field 'rules'"` |
 | customRules `name` not a string / empty | `"monitoring.prometheusRule.customRules[N]: field 'name' must be a string, got T"` / `"... must not be empty"` |
 | customRules `rules` not a JSON array / empty array | `"monitoring.prometheusRule.customRules[N]: field 'rules' must be a JSON array, got T"` / `"... must contain at least one rule"` |
 | `serviceMonitor.interval` not a Prometheus duration (e.g. `"5 seconds"`) | `"monitoring.serviceMonitor.interval \"...\" is not a valid Prometheus duration ..."` |
-| Invalid K8s label on `serviceMonitor.labels`/`prometheusRule.labels` | `"monitoring.serviceMonitor.labels key \"k\" is not a valid Kubernetes label key: ..."` / `"...labels[\"k\"] value \"v\" is not a valid Kubernetes label value: ..."` |
+| Invalid K8s label on `serviceMonitor.labels`/`prometheusRule.labels` | `"PATH key \"k\" is not a valid Kubernetes label key: ..."` / `"PATH[\"k\"] value \"v\" is not a valid Kubernetes label value: ..."` — `PATH` is the dotted CR path the caller passes: `monitoring.serviceMonitor.labels` or `monitoring.prometheusRule.labels` |
 
 These are validated because the reconciler copies them verbatim onto the ServiceMonitor/PrometheusRule; the Prometheus Operator / API server would otherwise reject them at apply time, leaving monitoring silently broken.
 
@@ -203,7 +203,9 @@ The **AerospikeClusterTemplate CR** has its own admission webhook (registered in
 | Rule | Error Message |
 |------|--------------|
 | overrides without templateRef | `"spec.overrides can only be set when spec.templateRef is specified"` |
-| `templateRef` added / removed / changed on update | `"spec.templateRef is immutable: cannot add/remove/change templateRef ..."` — create a new cluster instead |
+| `templateRef` **added** on update | `"spec.templateRef is immutable: cannot add templateRef to an existing cluster; create a new cluster that references the template"` |
+| `templateRef` **removed** on update | `"spec.templateRef is immutable: cannot remove templateRef from a cluster that was created with one (was \"name\")"` |
+| `templateRef` **changed** on update | `"spec.templateRef is immutable: cannot change templateRef from \"a\" to \"b\"; create a new cluster instead"` |
 
 ---
 
