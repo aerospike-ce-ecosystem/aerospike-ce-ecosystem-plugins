@@ -608,7 +608,8 @@ COVERAGE — what this checker does and does not verify
   reduces each message to a skeleton with its `%verbs` marked, and accepts a
   claim only if one skeleton either matches it whole (with each verb standing in
   for the value the docs spelled out) or contains all its fixed runs in order.
-  Measured at the pinned SHAs: 99 claims checked, 2 reported, both genuine.
+  Measured at the pinned SHAs: 101 claims checked, 0 reported, and it
+  catches all three of the planted-regression shapes it is tested against.
   Re-measure if you touch the matcher, and record the number here.
 
   NOT verified — these still need human review:
@@ -625,7 +626,7 @@ COVERAGE — what this checker does and does not verify
       names; Ginkgo/pytest specifics.
 
   Honest denominator: the drift audit that motivated this checker examined
-  ~1,770 claims. The categories above cover 420 of them at the pinned SHAs —
+  ~1,770 claims. The categories above cover 422 of them at the pinned SHAs —
   roughly a quarter of that population,
   and they are deliberately the fifth where a wrong claim fails SILENTLY — a bad
   label selector or condition type exits 0 and prints nothing, so no human ever
