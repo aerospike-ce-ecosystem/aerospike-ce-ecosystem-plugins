@@ -119,6 +119,22 @@ results = client.batch_remove(keys)
 failed = [br for br in results.batch_records if br.result != 0]
 ```
 
+### batch_apply(keys, module, function, args=None, policy=None) -> BatchWriteResult
+
+Run one UDF across many records in a single batch call.
+
+```python
+keys = [("test", "demo", f"u_{i}") for i in range(10)]
+results = client.batch_apply(keys, "test_udf", "add", [10, 20])
+
+# Async
+results = await async_client.batch_apply(keys, "test_udf", "add", [10, 20])
+```
+
+`keys` takes bare `Key` tuples, or `(key, meta)` pairs where `meta` is a flat dict overriding the call shape (`module`, `function`, `args`) and policy fields (`ttl`, `commit_level`, `key`, `durable_delete`) for that one record. A per-record `args` overrides the default even when it is `[]`.
+
+A UDF's return value comes back in that record's bin map under the Lua-convention key `"SUCCESS"` — read `br.record.bins["SUCCESS"]`, not a dedicated field. Metric label: `batch_apply`.
+
 ### batch_write(records, policy=None, retry=0) -> BatchWriteResult
 
 Write multiple records with per-record bins (and optional per-record TTL/gen via `WriteMeta`). Each record is a `(key, bins)` tuple, or `(key, bins, meta)` for TTL/gen control. Different from `batch_operate` (which applies the same ops to all keys) — each record can have a completely different bin set.
