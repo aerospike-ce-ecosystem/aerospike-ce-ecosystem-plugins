@@ -66,7 +66,7 @@ spec:
       proto-fd-max: 20000               # Dynamic parameter
     namespaces:
       - name: test
-        evict-used-pct: 70              # Dynamic parameter (CE 8.1)
+        evict-used-pct: 70              # NOT dynamic — editing this cold-restarts the pods
         stop-writes-sys-memory-pct: 90  # Dynamic parameter (CE 8.1)
 ```
 
