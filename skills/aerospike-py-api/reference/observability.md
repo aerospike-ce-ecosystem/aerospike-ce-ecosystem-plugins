@@ -49,7 +49,13 @@ Operation-level metrics collected in Rust, exposed in Prometheus text format. Me
 
 Histogram. Labels: `db_system_name` (always `aerospike`), `db_namespace`, `db_collection_name`, `db_operation_name`, `error_type` (empty on success, exception name on failure). Buckets: `0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0` seconds.
 
-Instrumented operations: `put`, `get`, `select`, `exists`, `delete`, `touch`, `append`, `prepend`, `increment`, `operate`, `batch_read`, `batch_operate`, `batch_remove`, `batch_write`, `query`. (`exists()` treats `KeyNotFoundError` as success.)
+Instrumented operations, by exact `db_operation_name` label value:
+
+`put`, `get`, `select`, `exists`, `delete`, `touch`, `append`, `prepend`, `increment`, `operate`, `operate_ordered`, `remove_bin`, `batch_read`, `batch_operate`, `batch_remove`, `batch_apply`, `batch_write`, `batch_write_numpy`, `query`, `scan`.
+
+**Retries carry their own label.** `batch_write` and `batch_write_numpy` emit a second observation under `batch_write_retry` / `batch_write_numpy_retry` when the retry path runs (`rust/src/client_ops.rs:455-457`), so summing the base label alone undercounts.
+
+(`exists()` treats `KeyNotFoundError` as success — a missing record leaves `error_type` empty rather than recording an error.)
 
 ### Example output
 

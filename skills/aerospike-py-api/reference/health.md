@@ -3,7 +3,7 @@
 ## Table of Contents
 - [`ping()` — round-trip health probe](#ping--round-trip-health-probe)
 - [Liveness vs Readiness in Kubernetes](#liveness-vs-readiness-in-kubernetes)
-- [Comparison with `get_node_names()`](#comparison-with-get_node_names)
+- [Comparison with `get_node_names()` and `is_connected()`](#comparison-with-get_node_names-and-is_connected)
 
 ---
 
@@ -43,7 +43,7 @@ For the `client.ping()`-driven `/health/ready` route (with `Depends(get_client)`
 
 ---
 
-## Comparison with `get_node_names()`
+## Comparison with `get_node_names()` and `is_connected()`
 
 `get_node_names()` returns the locally cached list of cluster nodes from the most recent tend cycle. It does not perform any network I/O at call time and always returns synchronously, even on `AsyncClient`.
 
@@ -55,7 +55,14 @@ For the `client.ping()`-driven `/health/ready` route (with `Depends(get_client)`
 | Raises on failure | no (returns `False`) | no (returns possibly stale list) |
 | Good for | readiness probe | introspection, metrics labels |
 
-If the cluster has gone fully unreachable but the tend interval has not yet elapsed, `get_node_names()` may still return a non-empty list — making it unsuitable as a health check on its own.
+`is_connected()` reports whether the client currently holds an active cluster connection — again a local check with no network I/O — and the sync and async clients do not implement it the same way:
+
+| | what it checks |
+|---|---|
+| `Client.is_connected()` | state is `CONNECTED` **and** `aerospike-core` reports a non-empty node list on an unclosed cluster (`rust/src/client.rs:144-151`) |
+| `AsyncClient.is_connected()` | state is `CONNECTED` **and** an inner client exists — no cluster check at all (`rust/src/async_client.rs:225-228`) |
+
+If the cluster has gone fully unreachable but the tend interval has not yet elapsed, `get_node_names()` may still return a non-empty list — making it unsuitable as a health check on its own. `is_connected()` shares that limitation. Use `ping()` for readiness; use `is_connected()` only to avoid operating on a client that was never connected or has been closed.
 
 ---
 
