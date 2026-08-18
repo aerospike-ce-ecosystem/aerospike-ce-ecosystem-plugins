@@ -38,11 +38,15 @@ Catalog of Kubernetes events emitted by the ACKO operator. Count grows over rele
 
 ### Dynamic Config 2-Phase Commit (April 2026)
 
+Phase 1 (validate-all) failure emits **no event** — it is only logged. There is no
+`DynamicConfigValidationFailed` reason; diagnose an aborted update from the operator log
+and from the `DynamicConfigDegraded` condition instead.
+
 | Event Reason | Type | When Emitted |
 |---|---|---|
-| `DynamicConfigValidationFailed` | Warning | Phase 1 (validate-all) rejected the change on at least one pod; whole update aborted before any pod is mutated |
-| `DynamicConfigRollbackTriggered` | Warning | Phase 2 apply failed on a pod; LIFO rollback started across already-updated pods |
-| `DynamicConfigRollbackFailed` | Warning | Rollback itself failed; cluster transitioning to `phase=ConfigDegraded` |
+| `DynamicConfigApplied` | Normal | A dynamic config change was applied to a pod |
+| `DynamicConfigRollback` | Warning | Phase 2 apply failed on a pod; LIFO rollback started across already-updated pods |
+| `DynamicConfigStatusFailed` | Warning | The operator could not write the dynamic-config status back to the CR |
 | `DynamicConfigDegraded` | Warning | `ConditionDynamicConfigDegraded=True` set; reconciliation halts until manual intervention |
 | `ConfigDegradedSkip` | Warning | Reconcile skipped because the cluster is in `phase=ConfigDegraded` (message: `"Reconcile skipped due to ConfigDegraded phase"`; repeats every ~60s until resolved) |
 
@@ -124,8 +128,8 @@ Catalog of Kubernetes events emitted by the ACKO operator. Count grows over rele
 
 | Event Reason | Type | When Emitted |
 |---|---|---|
-| `ClusterPaused` | Normal | `spec.paused=true` observed; reconciliation suspended; `ConditionReconciliationPaused=True` |
-| `ClusterResumed` | Normal | `spec.paused` cleared; `failedReconcileCount`/`lastReconcileError` cleared; `ConditionReconciliationPaused=False` |
+| `ReconciliationPaused` | Normal | `spec.paused=true` observed; reconciliation suspended; `ConditionReconciliationPaused=True` |
+| `ReconciliationResumed` | Normal | `spec.paused` cleared; `failedReconcileCount`/`lastReconcileError` cleared; `ConditionReconciliationPaused=False` |
 
 ---
 

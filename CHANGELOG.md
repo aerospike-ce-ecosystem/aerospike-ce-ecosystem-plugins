@@ -9,6 +9,15 @@ Per-release notes are also auto-published to [GitHub Releases](https://github.co
 
 ## [Unreleased]
 
+### Added
+
+- `scripts/verify_skill_claims.py` plus the `Verify skill claims` workflow — a CI gate that checks factual claims in `skills/` against **pinned** checkouts of the operator, `ackoctl`, `aerospike-py`, and cluster-manager (SHAs in `scripts/sources.lock`). It verifies 314 claims across eight categories that each resolve to a closed set in source: label selectors, condition types, phase names, event reasons, CRD field names, `ackoctl` flags, `aerospike-py` constants, and cluster-manager routes. These are deliberately the categories where a wrong claim fails *silently* — a bad label selector or condition type exits 0 and prints nothing, so nobody ever sees an error. Coverage is roughly a fifth of the ~1,770 claims the drift audit examined; `--coverage` prints exactly what is and is not checked, and the CI job publishes it in the run summary. Webhook error strings were tried and deliberately excluded: Go assembles them from format verbs and concatenated literals, so 19 of 29 reports were false, and a noisy check gets disabled rather than fixed.
+
+### Fixed
+
+- Five event reasons in `acko-operations/reference/events.md` that the operator never emits: `DynamicConfigValidationFailed`, `DynamicConfigRollbackTriggered`, `DynamicConfigRollbackFailed`, `ClusterPaused`, and `ClusterResumed`. The real reasons are `DynamicConfigApplied`, `DynamicConfigRollback`, `DynamicConfigStatusFailed`, `ReconciliationPaused`, and `ReconciliationResumed` (`internal/controller/events.go`); phase-1 validation failure emits no event at all and is only logged, which the page now states.
+- `status.operation.*` → `status.operationStatus.*` in `acko-deploy/reference/cr-spec-fields.md` (3 sites). The CRD field is `operationStatus` (`aerospikecluster_types.go:441`), so the documented jsonpath returned nothing.
+
 ### Changed
 
 - The `aerospike-py-api` skill now documents the `.result_code: int` attribute on Aerospike exceptions. Server errors carry the actual wire code, such as `FailForbidden`=22, while client-side errors use the `-1` `CLIENT_SIDE_RESULT_CODE` sentinel. Applications can use this structured value instead of parsing error messages (aerospike-py ADR-0027, PR #413).

@@ -79,9 +79,9 @@ Trigger manual restarts without otherwise changing the spec. The webhook prevent
 | `spec.operations[].kind` | enum | `WarmRestart` (sends SIGUSR1 to the aerospike process, no pod recreate) or `PodRestart` (delete + recreate pods) |
 | `spec.operations[].id` | string | Unique-per-cluster id, length 1–20 chars. Identifies one operation across reconciles. |
 | `spec.operations[].podList` | list[string] | Optional. Subset of pod names to target. Omit to apply to all pods. |
-| `status.operation.phase` | enum | `InProgress` / `Completed` / `Error`. Goes to `Error` (not silent Completed) on an unknown `kind` or when `podList` names no existing pods. |
-| `status.operation.completedPods` | list[string] | Pods that finished successfully |
-| `status.operation.failedPods` | list[string] | Pods that errored |
+| `status.operationStatus.phase` | enum | `InProgress` / `Completed` / `Error`. Goes to `Error` (not silent Completed) on an unknown `kind` or when `podList` names no existing pods. |
+| `status.operationStatus.completedPods` | list[string] | Pods that finished successfully |
+| `status.operationStatus.failedPods` | list[string] | Pods that errored |
 
 On-demand `WarmRestart`/`PodRestart` batches gate on the same readiness-gate / migration guard as rolling restarts, so a batch may legitimately pause until pods rejoin or migrations drain.
 

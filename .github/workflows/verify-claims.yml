@@ -1,0 +1,90 @@
+name: Verify skill claims
+
+# Checks factual claims in skills/ against pinned checkouts of the source repos.
+#
+# This is the enforcement half of goal 4-1 ("keep skills current"). Before it
+# existed nothing scored the skills, which is how a drift audit came to find 128
+# wrong claims — including ~20 commands that exit 0 and print nothing, so the
+# failure was invisible to both Claude and the user.
+#
+# Scope is deliberately narrow and honest: see `scripts/verify_skill_claims.py
+# --coverage`, which is printed in the job summary on every run.
+
+on:
+  pull_request:
+    paths:
+      - 'skills/**'
+      - 'scripts/verify_skill_claims.py'
+      - 'scripts/sources.lock'
+      - 'scripts/fetch_sources.sh'
+      - '.github/workflows/verify-claims.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'skills/**'
+      - 'scripts/**'
+  # Sources are pinned, so a scheduled run cannot surface upstream drift by
+  # itself — it guards against bit-rot in the checker (a source layout change
+  # that makes an extractor silently stop matching is reported as SKIPPED).
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-claims-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout plugin repo
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      # The checker uses only the standard library, so there is nothing to install.
+
+      - name: Cache pinned source checkouts
+        uses: actions/cache@v4
+        with:
+          path: .source-cache
+          # Keyed on the lock file: a SHA bump invalidates the cache, and
+          # nothing else needs to.
+          key: sources-${{ hashFiles('scripts/sources.lock') }}
+
+      - name: Fetch pinned sources
+        run: ./scripts/fetch_sources.sh .source-cache
+
+      - name: Verify claims
+        id: verify
+        run: |
+          python3 scripts/verify_skill_claims.py \
+            --sources .source-cache \
+            --format github | tee /tmp/verify.txt
+          exit "${PIPESTATUS[0]}"
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo '## Skill claim verification'
+            echo
+            echo '```'
+            sed 's/^::error [^:]*:://' /tmp/verify.txt 2>/dev/null || echo 'checker did not produce output'
+            echo '```'
+            echo
+            echo '<details><summary>What this does and does not check</summary>'
+            echo
+            echo '```'
+            python3 scripts/verify_skill_claims.py --coverage
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
