@@ -15,6 +15,7 @@ Per-release notes are also auto-published to [GitHub Releases](https://github.co
 
 ### Fixed
 
+- Corrected `status.operation` to `status.operationStatus` in the two remaining `acko-deploy` sites, both comments in `examples/09-operations.yaml`. #102 fixed the `cr-spec-fields.md` rows; the example a reader copy-pastes still printed nothing.
 - Five event reasons in `acko-operations/reference/events.md` that the operator never emits: `DynamicConfigValidationFailed`, `DynamicConfigRollbackTriggered`, `DynamicConfigRollbackFailed`, `ClusterPaused`, and `ClusterResumed`. The real reasons are `DynamicConfigApplied`, `DynamicConfigRollback`, `DynamicConfigStatusFailed`, `ReconciliationPaused`, and `ReconciliationResumed` (`internal/controller/events.go`); phase-1 validation failure emits no event at all and is only logged, which the page now states.
 - `status.operation.*` → `status.operationStatus.*` in `acko-deploy/reference/cr-spec-fields.md` (3 sites). The CRD field is `operationStatus` (`aerospikecluster_types.go:441`), so the documented jsonpath returned nothing.
 
