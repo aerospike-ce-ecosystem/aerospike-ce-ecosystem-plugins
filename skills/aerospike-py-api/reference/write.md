@@ -676,4 +676,6 @@ results = await async_client.batch_write_numpy(data, "test", "demo", dtype, retr
 results = client.batch_write_numpy(data, "test", "demo", dtype, key_field="user_id")
 ```
 
-A custom `key_field` not starting with `_` is **also** stored as a bin. Round-trip read: `client.batch_read(keys, policy={"key": aerospike.POLICY_KEY_SEND}).to_numpy(read_dtype)`. Keep batches at 100–5,000 rows; chunk larger datasets.
+The `key_field` is **not** stored as a bin — `numpy_to_records` filters it out when building the bin list (`rust/src/numpy_support.rs:1084`: `.filter(|f| f.name != key_field && !f.name.starts_with('_'))`), so it is consumed as the user key and nothing else. If you need the value readable as data, add a second dtype field carrying a copy.
+
+Round-trip read: `client.batch_read(keys).to_numpy(read_dtype)`. Do **not** pass `policy={"key": POLICY_KEY_SEND}` — `batch_read` ignores it. Neither `parse_batch_policy` nor `parse_batch_read_policy` reads a `key` entry (`rust/src/policy/batch_policy.rs`), so the option is silently dropped rather than rejected, and the keys are not returned. Keep batches at 100–5,000 rows; chunk larger datasets.

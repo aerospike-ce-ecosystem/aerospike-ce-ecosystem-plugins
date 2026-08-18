@@ -49,7 +49,7 @@ Operation-level metrics collected in Rust, exposed in Prometheus text format. Me
 
 Histogram. Labels: `db_system_name` (always `aerospike`), `db_namespace`, `db_collection_name`, `db_operation_name`, `error_type` (empty on success, exception name on failure). Buckets: `0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0` seconds.
 
-Instrumented operations: `put`, `get`, `select`, `exists`, `remove`, `touch`, `append`, `prepend`, `increment`, `operate`, `batch_read`, `batch_operate`, `batch_remove`, `batch_write`, `query`. (`exists()` treats `KeyNotFoundError` as success.)
+Instrumented operations: `put`, `get`, `select`, `exists`, `delete`, `touch`, `append`, `prepend`, `increment`, `operate`, `batch_read`, `batch_operate`, `batch_remove`, `batch_write`, `query`. (`exists()` treats `KeyNotFoundError` as success.)
 
 ### Example output
 
