@@ -8,7 +8,12 @@ The operator converts CRD YAML fields to aerospike.conf syntax automatically.
 | `logging: [{ name: /path }]` | `logging { file /path { ... } }` |
 | `storage-engine: { type: memory, data-size: N }` | `storage-engine memory { data-size N }` |
 | `storage-engine: { type: device, file: ... }` | `storage-engine device { file ... }` |
-| `security: {}` | `security { }` |
+| `security: {}` | *(nothing — not rendered)* |
+
+**`security` is dropped, not rendered.** `generateConfig` hits `case SectionSecurity: continue`
+(`internal/configgen/generator.go:59-60`) and emits nothing, so no `security` stanza reaches
+`aerospike.conf` however the key is written. CE has no security feature to configure, and the
+webhook separately rejects the Enterprise `security` sub-keys (`tls`/`ldap`/`log`/`syslog`).
 
 **Key rule**: Size values in `aerospikeConfig` are always integer bytes. The operator passes them directly to the generated config file.
 

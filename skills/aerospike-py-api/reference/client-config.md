@@ -19,8 +19,8 @@ Import from `aerospike_py.types`. Used by `aerospike.client(config)` and `AsyncC
 | user | str | None | Username for authentication |
 | password | str | None | Password for authentication |
 | timeout | int | 30000 | Connection timeout (ms) |
-| idle_timeout | int | 55000 | Idle connection timeout (ms) |
-| max_conns_per_node | int | 300 | Max connections per node |
+| idle_timeout | int | 30000 | Idle connection timeout (ms) |
+| max_conns_per_node | int | 256 | Max connections per node |
 | min_conns_per_node | int | 0 | Min connections per node (pre-warm) |
 | conn_pools_per_node | int | 1 | Connection pools per node |
 | tend_interval | int | 1000 | Cluster tend interval (ms) |

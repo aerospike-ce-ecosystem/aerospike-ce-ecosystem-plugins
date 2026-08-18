@@ -9,7 +9,15 @@ The ACKO webhook rejects CRs that violate these constraints:
 - `size > 8` -> rejected
 - `namespaces > 2` -> rejected; duplicate namespace name -> rejected
 - Image contains `enterprise`/`ee-`/`ent-` or references `aerospike-server-enterprise` -> rejected; CE image major `< 8` (incl. dotless `ce-7`/`7`) -> rejected
-- `xdr` or `tls` section present -> rejected
+- `xdr` section present -> rejected
+- **TLS, at every place it can be written** -> rejected (ACKO #349). All three layers — cluster webhook, template webhook, and merged-template resolver — check:
+  - top-level `aerospikeConfig.tls`
+  - `aerospikeConfig.network.tls` — the certificate/key stanza; **presence of the key is enough**, the value shape is irrelevant
+  - any `tls-*` key under `network.service`, `network.heartbeat`, `network.fabric` (`tls-port`, `tls-name`, `tls-authenticate-client`, …) — matched by prefix, which is safe because no CE config key starts with `tls-`
+
+  The nested forms matter more than the top-level one, because `network { tls <name> {...} }` plus `tls-port`/`tls-name` on the endpoints is exactly what the Aerospike docs tell a user to write. Before #349 only the top-level key was checked, so that config was **admitted**, configgen passed it through verbatim, and the CE `asd` process refused to start — a permanent CrashLoopBackOff with no admission error naming the Enterprise feature. On a live cluster it was worse: the edit bumps the config hash, so the rolling restart walks every pod into the crash loop one batch at a time.
+
+  Same coverage on **update**, not just create, and via per-rack `aerospikeConfig` and `spec.overrides.aerospikeConfig`. Messages name the full key path, e.g. `"aerospikeConfig.network must not contain 'tls' section (TLS is Enterprise-only)"` and `"aerospikeConfig.network.heartbeat.tls-port is not allowed in CE edition (TLS is Enterprise-only)"`.
 - Enterprise `security` keys (`tls`/`ldap`/`log`/`syslog`) or logging contexts (`audit`/`report-*`) -> rejected
 - Admin user missing `sys-admin` + `user-admin` -> rejected
 - Admin privilege (`sys-admin`/`user-admin`/`data-admin`) with a `.namespace`/`.set` scope, or a malformed scope -> rejected

@@ -4,12 +4,12 @@
 
 | Parameter | Default | Dynamic | Notes |
 |-----------|---------|---------|-------|
-| `max-record-size` | **1M** | Yes | 7.1+ new default. Max 8M |
+| `max-record-size` | **1M** | No | 7.1+ new default. Max 8M. Absent from the operator's dynamic allowlist — editing it cold-restarts the pods |
 | `flush-size` | **1M** | No | 7.1+ replaces write-block-size. NVMe: 128K recommended |
 | `data-size` | - | No | 7.0+ replaces memory-size. Specified inside storage-engine block |
 | `stop-writes-sys-memory-pct` | **90** | Yes | 7.0+ replaces stop-writes-pct |
-| `evict-used-pct` | **70** | Yes | Device storage utilization eviction threshold |
-| `evict-tenths-pct` | **5** | Yes | Eviction rate per cycle (0.5%) |
+| `evict-used-pct` | **70** | No | Device storage utilization eviction threshold. Absent from the operator's dynamic allowlist — editing it cold-restarts the pods |
+| `evict-tenths-pct` | **5** | No | Eviction rate per cycle (0.5%). Absent from the operator's dynamic allowlist — editing it cold-restarts the pods |
 | `cluster-name` | (none) | No | **8.0+ strongly recommended**; prevents unintended cluster joins |
 | `nsup-period` | **0** | Yes | If 0 and default-ttl != 0, **server fails to start** |
 
