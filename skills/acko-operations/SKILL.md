@@ -70,7 +70,16 @@ Resume clears stale `failedReconcileCount`/`lastReconcileError` — the recommen
 
 ## 7. Delete Cluster (ops ref §12)
 
-`kubectl delete asc <name> -n <ns>` → `ClusterDeletionStarted` → `Deleting` → `FinalizerRemoved`. `cascadeDelete: true` deletes PVCs; otherwise clean up with `kubectl delete pvc -n <ns> -l app.kubernetes.io/instance=<name>`.
+**Confirm before running.** Deleting a cluster is irreversible, and with `cascadeDelete: true` it destroys the PVCs and the data on them. State the cluster **name**, the **namespace**, and the effective `cascadeDelete` value back to the user and get explicit agreement first. Read the effective value rather than assuming it — `cascadeDelete` is **per volume** (`spec.storage.volumes[].cascadeDelete`), defaulted by `spec.storage.{filesystemVolumePolicy,blockVolumePolicy}.cascadeDelete`, with the per-volume setting winning:
+
+```bash
+kubectl get asc <name> -n <ns> -o jsonpath='{range .spec.storage.volumes[*]}{.name}{"\t"}{.cascadeDelete}{"\n"}{end}'
+kubectl get asc <name> -n <ns> -o jsonpath='fs={.spec.storage.filesystemVolumePolicy.cascadeDelete}{"\n"}block={.spec.storage.blockVolumePolicy.cascadeDelete}{"\n"}'
+```
+
+An empty result means the field is unset on that volume, so the policy default applies.
+
+`kubectl delete asc <name> -n <ns>` → `ClusterDeletionStarted` → `Deleting` → `FinalizerRemoved`. `cascadeDelete: true` deletes PVCs; otherwise clean up with `kubectl delete pvc -n <ns> -l app.kubernetes.io/instance=<name>` (also irreversible — confirm separately).
 
 ## 8. Template Resync (ops ref §5)
 
