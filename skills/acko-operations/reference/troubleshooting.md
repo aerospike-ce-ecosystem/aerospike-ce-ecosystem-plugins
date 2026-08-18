@@ -19,7 +19,7 @@ Symptom-based diagnostic reference for ACKO Aerospike clusters.
 | Pod `CrashLoopBackOff` | `kubectl logs <pod> -c aerospike-server --previous` | Config parse error, OOM, invalid parameters | Check server logs, fix aerospikeConfig |
 | Webhook rejects CR (shape) | Read `kubectl apply` error output | Wrong YAML shape | `service`/`network` maps; `logging` a list; namespace entries maps with unique `name` |
 | Webhook rejects CR (CE constraint) | Read `kubectl apply` error output | size>8, namespaces>2, dup namespace, enterprise/`ce-<8` image, xdr/tls, enterprise logging context, scoped admin privilege, per-rack CE violation | Fix per `validation-rules.md` |
-| `dynamicConfigStatus=Failed` | `kubectl get asc <name> -o jsonpath='{.status.pods}' \| jq '.[].dynamicConfigStatus'` | Parameter is not dynamically changeable | Set `enableDynamicConfigUpdate: false` to force rolling restart |
+| Dynamic config change did not take effect (no `dynamicConfigStatus` on the pod) | `kubectl get asc <name> -o jsonpath='{.status.conditions[?(@.type=="DynamicConfigDegraded")]}' \| jq` then the operator log | Parameter is not dynamically changeable, or phase-1 validation rejected it (logged only, no event) | Set `enableDynamicConfigUpdate: false` to force a rolling restart |
 | `ReadinessGateBlocking` | `kubectl get pod <pod> -o jsonpath='{.status.conditions}' \| jq '.[]'` | Readiness gate not satisfied | Check if Aerospike server is healthy inside the pod |
 
 ---

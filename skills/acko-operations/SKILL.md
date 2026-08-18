@@ -31,7 +31,7 @@ kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"image":"aerospike:ce
 
 Set `spec.enableDynamicConfigUpdate: true`, then patch the config value. The operator runs a 2PC rollout: **validate-all** (any pod rejects → whole update aborted, nothing mutated) → **apply sequentially** (per-pod 30s timeout) → on apply failure, **LIFO rollback**. Net effect: all pods on the new value, all pods back on the old value, or `phase=ConfigDegraded`.
 
-- Verify: `kubectl get asc <name> -o jsonpath='{.status.pods[*].dynamicConfigChanges}' | jq` (`result`: `Applied`/`Failed`/`Pending`/`RolledBack`/`RollbackFailed`).
+- Verify: `kubectl get asc <name> -o jsonpath='{.status.pods[*].dynamicConfigChanges}' | jq`. `result` is only ever `Applied` — a failed change leaves no entry. For failures read the `DynamicConfigDegraded` condition (reason `RollbackFailed`) and `status.phaseReason`.
 - `Failed` = phase-1 rejection or apply-failed-rollback-succeeded → set `enableDynamicConfigUpdate: false` to force a rolling restart instead.
 - **Removing** a key always forces a rolling restart (revert-to-default is not expressible as `set-config`). `replication-factor` (and legacy `memory-size`) are never dynamic — they cold-restart.
 - **ConfigDegraded** (apply AND rollback both failed): reconciliation **halts** with `ConfigDegradedSkip` Warning events (~60s requeue) until you intervene — revert the offending value, then cold-restart pods / reset the phase. Do NOT toggle `enableDynamicConfigUpdate`. Full recovery flow: `acko-debugging` skill.
@@ -90,7 +90,7 @@ Patch `spec.operations` to `null` (§4 command). Via cluster-manager API: `DELET
 
 ## 14. Troubleshooting
 
-For symptom-driven diagnosis (`phase=Error`, stuck migrations, `CrashLoopBackOff`, `CircuitBreakerActive`, `ConfigDegraded`, `ReadinessGateBlocking`, webhook rejection, `dynamicConfigStatus=Failed`), use the **`acko-debugging`** skill. It cross-links this skill's `reference/troubleshooting.md` (symptom→command table) and `reference/validation-rules.md` (canonical webhook error/warning catalog).
+For symptom-driven diagnosis (`phase=Error`, stuck migrations, `CrashLoopBackOff`, `CircuitBreakerActive`, `ConfigDegraded`, `ReadinessGateBlocking`, webhook rejection, a dynamic config change that did not take effect), use the **`acko-debugging`** skill. It cross-links this skill's `reference/troubleshooting.md` (symptom→command table) and `reference/validation-rules.md` (canonical webhook error/warning catalog).
 
 ## 15. Diagnostics / Metrics / Events / OTel
 

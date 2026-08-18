@@ -91,4 +91,4 @@ On-demand `WarmRestart`/`PodRestart` batches gate on the same readiness-gate / m
 |-------|------|-------------|
 | `status.phase` | enum | `""`, `InProgress`, `Completed`, `Error`, `ScalingUp`, `ScalingDown`, `WaitingForMigration`, `RollingRestart`, `ACLSync`, `Paused`, `Deleting`, `ConfigDegraded`, `BackoffActive`. Circuit breaker is `BackoffActive` (not `Error`); ACL-failure stays in `ACLSync`. |
 | `status.conditions[]` | list | `Available`, `Ready`, `ConfigApplied`, `ACLSynced`, `MigrationComplete`, `ReconciliationPaused`, `ReconcileHealthy`, `DynamicConfigDegraded` (full reference in `acko-config-reference/reference/conditions-and-phases.md`) |
-| `status.pods[].dynamicConfigChanges[]` | list | Per-path tracking from last 2PC dynamic config attempt: `path`, `oldValue`, `newValue`, `result` ∈ {`Applied`,`Failed`,`Pending`,`RolledBack`,`RollbackFailed`} |
+| `status.pods[].dynamicConfigChanges[]` | list | Per-path tracking from last 2PC dynamic config attempt: `path`, `oldValue`, `newValue`, `result`. `result` is only ever `Applied` — the operator writes no other value, so a failed change leaves no entry rather than a failure status |
