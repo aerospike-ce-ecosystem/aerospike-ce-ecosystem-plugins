@@ -1,0 +1,88 @@
+name: Claim Check
+
+# Verifies that the factual claims in skills/ still match the source repos the
+# skills document. See tools/claim-check/README.md for what this proves and,
+# just as importantly, what it does not.
+
+on:
+  pull_request:
+    paths:
+      - "skills/**"
+      - "tools/claim-check/**"
+      - ".github/workflows/claim-check.yml"
+  schedule:
+    # Weekly, Monday 05:00 UTC — an hour before the link check. The scheduled
+    # run is what catches drift introduced by a change in a *source* repo,
+    # which no PR here would touch.
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  claim-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install --quiet pyyaml
+
+      - name: Cache source checkouts
+        uses: actions/cache@v4
+        with:
+          path: .claim-check-cache
+          # Keyed on sources.json: a ref bump must re-clone rather than reuse a
+          # checkout of the previous commit, which would verify against the
+          # wrong source and pass for the wrong reason.
+          key: claim-check-${{ hashFiles('tools/claim-check/sources.json') }}
+
+      - name: Self-test the checker
+        # A verifier that accepts everything is indistinguishable from a
+        # passing rule. This asserts each rule still rejects a known-false
+        # claim before any of them are trusted below.
+        env:
+          CLAIM_CHECK_CACHE: .claim-check-cache
+        run: python3 tools/claim-check/selftest.py
+
+      - name: Verify skill claims against source
+        env:
+          CLAIM_CHECK_CACHE: .claim-check-cache
+        # --strict fails the job when a source repo could not be cloned, so a
+        # network problem cannot look like a clean run.
+        run: python3 tools/claim-check/check_claims.py --strict --coverage
+
+      - name: Machine-readable report
+        if: always()
+        env:
+          CLAIM_CHECK_CACHE: .claim-check-cache
+        run: |
+          python3 tools/claim-check/check_claims.py --json > claim-check.json || true
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, pathlib
+          d = json.loads(pathlib.Path("claim-check.json").read_text())
+          t = d["totals"]
+          print(f"### claim-check\n")
+          print(f"`{t['checked']}` claims checked · "
+                f"`{t['failed']}` failed · `{t['skipped']}` unverifiable\n")
+          print("| rule | checked | failed |")
+          print("|---|--:|--:|")
+          for r in d["rules"]:
+              print(f"| `{r['rule']}` | {r['checked']} | {len(r['failures'])} |")
+          print(f"\nrefs: " + ", ".join(f"`{k}@{v}`" for k, v in d["refs"].items()))
+          PY
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claim-check-report
+          path: claim-check.json
+          if-no-files-found: ignore

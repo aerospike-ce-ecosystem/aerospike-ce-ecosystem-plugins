@@ -1,0 +1,7 @@
+# claim-check writes its report and its source checkouts here
+claim-check.json
+.claim-check-cache/
+
+# Python bytecode from tools/
+__pycache__/
+*.py[cod]
