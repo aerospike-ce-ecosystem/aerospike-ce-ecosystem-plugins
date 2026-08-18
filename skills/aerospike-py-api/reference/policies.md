@@ -2,6 +2,8 @@
 
 All policy dicts are passed as the `policy=` parameter to client methods.
 
+Defaults come from `aerospike-core` (pinned at `2.0.0` by `rust/Cargo.toml:31`) unless aerospike-py overrides them. The one override today is `WritePolicy.max_retries`, which aerospike-py sets to `0` for idempotency rather than inheriting the core default of `2` (`rust/src/policy/write_policy.rs:54-58`).
+
 ---
 
 ## ReadPolicy
@@ -91,7 +93,7 @@ Used by: `batch_read()`, `batch_operate()`, `batch_remove()`
 Used by: `Query.results()`, `Query.foreach()`
 
 ```python
-{"socket_timeout": 30000, "total_timeout": 0, "max_retries": 2,
+{"socket_timeout": 30000, "total_timeout": 0, "max_retries": 5,
  "max_records": 1000, "records_per_second": 0, "filter_expression": expr}
 ```
 
@@ -99,7 +101,7 @@ Used by: `Query.results()`, `Query.foreach()`
 |-----|------|---------|-------------|
 | socket_timeout | int | 30000 | Socket timeout (ms) |
 | total_timeout | int | 0 | Total timeout (0 = no limit) |
-| max_retries | int | 2 | Max retry attempts |
+| max_retries | int | 5 | Max retry attempts — queries retry more than reads/writes |
 | sleep_between_retries | int | 0 | Sleep between retries (ms) |
 | max_records | int | 0 | Max records to return (0 = all) |
 | records_per_second | int | 0 | Rate limit (0 = unlimited) |
@@ -117,7 +119,7 @@ Used by: all `admin_*` methods, index operations, `truncate()`
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| timeout | int | 1000 | Admin operation timeout (ms) |
+| timeout | int | 0 → **3000 effective** | Admin operation timeout (ms). The field defaults to `0`, and the client substitutes `3000` whenever it is `0`. Pass any positive value to override. |
 
 ---
 

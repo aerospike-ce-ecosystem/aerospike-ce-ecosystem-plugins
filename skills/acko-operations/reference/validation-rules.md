@@ -2,6 +2,16 @@
 
 Canonical catalog of ACKO webhook validation errors and non-blocking warnings. The exact count grows over releases — this page is the source of truth; `acko-config-reference/reference/webhook-validation.md` is a shape-and-constraints summary that links here.
 
+## How the messages reach you
+
+The webhook accumulates every failure and returns them as **one** error, joined with `"; "` and prefixed with `validation failed: ` (`api/v1alpha1/aerospikecluster_webhook.go:643`). So a real `kubectl apply` rejection looks like:
+
+```
+admission webhook "vaerospikecluster.kb.io" denied the request: validation failed: spec.size 9 exceeds CE maximum of 8; aerospikeConfig.namespaces count 3 exceeds CE maximum of 2
+```
+
+When matching on these strings, match a **substring**, never the whole message: most contain `%q`/`%d` interpolations mid-string, and several rules fire together. The messages below are written with `N`/`M`/`T`/`"name"` standing in for those interpolations.
+
 ---
 
 ## Validation Errors (CR Rejected)
@@ -11,7 +21,7 @@ Canonical catalog of ACKO webhook validation errors and non-blocking warnings. T
 | Rule | Error Message |
 |------|--------------|
 | `spec.size > 8` | `"spec.size N exceeds CE maximum of 8"` |
-| `spec.size == 0` + no templateRef | `"spec.size must be set (1-8) when spec.templateRef is not specified"` |
+| `spec.size == 0` + no templateRef | `"spec.size must be set (1–8) when spec.templateRef is not specified"` (note: **en dash** U+2013, not `-`) |
 | `spec.image` empty + no templateRef | `"spec.image must not be empty when spec.templateRef is not specified"` |
 | Image references the enterprise repo | `"spec.image \"...\" references the enterprise repository (aerospike-server-enterprise); CE clusters must use a CE image such as aerospike:ce-8.1.1.1"` |
 | Image contains `enterprise`/`ee-`/`ent-` | `"spec.image \"...\" is an Enterprise Edition image; only Community Edition images are allowed"` |
@@ -24,7 +34,9 @@ Image tag parsing (#321) uses the last colon after the final `/` and strips `@sh
 | Rule | Error Message |
 |------|--------------|
 | `xdr` section present | `"aerospikeConfig must not contain 'xdr' section (XDR is Enterprise-only)"` |
-| `tls` section present | `"aerospikeConfig must not contain 'tls' section (TLS is Enterprise-only)"` |
+| top-level `tls` section present | `"aerospikeConfig must not contain 'tls' section (TLS is Enterprise-only)"` |
+| nested `network.tls` section present | `"aerospikeConfig.network must not contain 'tls' section (TLS is Enterprise-only)"` |
+| any `tls-*` key inside `network.{service,heartbeat,fabric}` (e.g. `tls-port`, `tls-name`, `tls-authenticate-client`) | `"aerospikeConfig.network.S.KEY is not allowed in CE edition (TLS is Enterprise-only)"` — one error per offending key, sorted |
 | namespaces > 2 | `"aerospikeConfig.namespaces count N exceeds CE maximum of 2"` |
 | `heartbeat.mode != "mesh"` | `"aerospikeConfig.network.heartbeat.mode must be 'mesh' for CE"` |
 | `service` not a map | `"aerospikeConfig.service must be a map"` |
@@ -35,7 +47,7 @@ Image tag parsing (#321) uses the last colon after the final `/` and strips `@sh
 | namespace entry not a map with `name` | `"aerospikeConfig.namespaces[N] must be a map with required key 'name'"` |
 | Duplicate namespace name | `"aerospikeConfig.namespaces[N]: duplicate namespace name \"name\"; each namespace must have a unique name"` |
 | Rack ID add+remove in single update (also fires when `rackConfig` is dropped entirely → implicit rack 0) | `"cannot add new rack IDs [...] and remove existing rack IDs [...] in the same update; please do this in two separate steps"` — when the implicit default rack (ID 0) is involved, the message instead explains that switching between the default rack and explicit racks recreates StatefulSets and risks data loss |
-| `MetricLabels` value contains control chars | `"monitoring.metricLabels[\"key\"]: control characters are not permitted in TOML output"` |
+| `metricLabels` value contains control chars | `"monitoring.metricLabels[\"key\"] value must not contain control characters"` |
 
 ### Network Ports (fixed by the operator)
 
@@ -111,16 +123,23 @@ Privilege format: `"<code>"` / `"<code>.<namespace>"` / `"<code>.<namespace>.<se
 
 | Rule | Error Message |
 |------|--------------|
-| Rack ID <= 0 | `"rack ID must be > 0 (rack ID 0 is reserved)"` |
-| Duplicate Rack ID | `"duplicate rack ID N"` |
-| Duplicate rackLabel | `"duplicate rackLabel \"label\""` |
-| Duplicate nodeName | `"racks[N] and racks[M] both constrained to node \"name\""` |
-| Invalid IntOrString | `"rackConfig.scaleDownBatchSize must be a positive integer or percentage"` |
-| Rack ID changed on update | `"rackConfig rack IDs cannot be changed"` |
+| Rack ID <= 0 | `"rack ID must be > 0, got N (rack ID 0 is reserved for the default rack)"` |
+| Duplicate Rack ID | `"duplicate rack ID N in rackConfig"` |
+| Duplicate rackLabel | `"duplicate rackLabel \"label\" in rackConfig; each rack must have a unique rackLabel"` |
+| `scaleDownBatchSize` / `maxIgnorablePods` / `rollingUpdateBatchSize` below their minimum | `"rackConfig.FIELD must be a positive integer (got N)"` (`maxIgnorablePods` says `non-negative`) |
+| …given a string that is not a percentage | `"rackConfig.FIELD must be a positive integer or a percentage string (e.g., \"25%\"); got \"...\""` |
+| …given a percentage outside range | `"rackConfig.FIELD percentage must be between MIN and 100 (got N)"` / `"rackConfig.FIELD percentage \"...\" is not a valid integer"` |
 | More racks than `spec.size` | `"rackConfig defines N racks but spec.size is M; each rack must get at least 1 pod, so the rack count must not exceed spec.size"` (skipped when size deferred to templateRef) |
 | Per-rack `aerospikeConfig` override violates a CE constraint | `"rackConfig.racks[id=N].aerospikeConfig: <inner CE error>"` |
 
+`MIN` is 1 for `scaleDownBatchSize` and `rollingUpdateBatchSize`, 0 for `maxIgnorablePods` — the same `validateIntOrString` helper (`aerospikecluster_webhook.go:1637-1664`) also produces the `maxUnavailable` messages, with field name `maxUnavailable` and `MIN` 0.
+
 A rack's `aerospikeConfig` is DeepMerged into the effective config, so it is validated against the **same** CE constraints as cluster-level config (xdr/tls/security keys, >2 namespaces, mesh-only heartbeat). Prevents a CE bypass via per-rack override.
+
+**Rack IDs are mutable, and `nodeName` is not validated.** Two rules that sound plausible are *not* enforced — do not refuse an operation on their account:
+
+- **Rack IDs can be changed.** `ValidateUpdate` blocks only the *simultaneous* add-and-remove case (the row in [Aerospike Config](#aerospike-config) above); a pure addition or a pure removal is accepted (`aerospikecluster_webhook.go:308-350`). Renaming rack `1` to `2` is legal as two applies: add `2`, then remove `1`.
+- **Two racks may share a `nodeName`.** `Rack.NodeName` is never checked by `validateRackConfig` (`aerospikecluster_webhook.go:1549-1611`) — it validates rack ID, `rackLabel`, the IntOrString fields, and the per-rack `aerospikeConfig`, and nothing else. Sharing a node across racks is the normal shape for preferred (soft) anti-affinity, and the operator has a regression test asserting it is accepted (`webhook_test.go:3844-3862`).
 
 ### PodSpec Container Names
 
@@ -142,7 +161,7 @@ A rack's `aerospikeConfig` is DeepMerged into the effective config, so it is val
 | PV size empty/invalid/negative | `"persistentVolume.size must not be empty"` / `"is not a valid Kubernetes quantity"` |
 | Path not absolute | `"aerospike.path must be an absolute path"` |
 | subPath + subPathExpr both set | `"subPath and subPathExpr are mutually exclusive"` |
-| deleteLocalStorageOnRestart + empty localStorageClasses | `"deleteLocalStorageOnRestart is true but localStorageClasses is empty"` |
+| deleteLocalStorageOnRestart + empty localStorageClasses | `"storage.deleteLocalStorageOnRestart is true but storage.localStorageClasses is empty; specify which storage classes are local"` |
 
 ### Monitoring Validation
 
@@ -151,14 +170,17 @@ A rack's `aerospikeConfig` is DeepMerged into the effective config, so it is val
 | Port out of range | `"monitoring.port must be in range 1-65535"` |
 | Port conflicts with 3000-3003 | `"monitoring.port N conflicts with Aerospike service port"` |
 | exporterImage empty when enabled | `"monitoring.exporterImage must not be empty when monitoring is enabled"` |
-| metricLabels contain `=` or `,` | `"monitoring.metricLabels key/value must not contain '=' or ','"` |
-| customRules missing name/rules | `"customRules[N]: missing required field 'name'/'rules'"` |
+| metricLabels **key** outside `^[A-Za-z0-9_-]+$` | `"monitoring.metricLabels key \"k\" must contain only ASCII letters, digits, dashes, and underscores"` |
+| customRules missing name/rules | `"monitoring.prometheusRule.customRules[N]: missing required field 'name'"` / `"... missing required field 'rules'"` |
+| customRules value is not valid JSON | `"monitoring.prometheusRule.customRules[N]: invalid JSON: ..."` |
 | customRules `name` not a string / empty | `"monitoring.prometheusRule.customRules[N]: field 'name' must be a string, got T"` / `"... must not be empty"` |
 | customRules `rules` not a JSON array / empty array | `"monitoring.prometheusRule.customRules[N]: field 'rules' must be a JSON array, got T"` / `"... must contain at least one rule"` |
 | `serviceMonitor.interval` not a Prometheus duration (e.g. `"5 seconds"`) | `"monitoring.serviceMonitor.interval \"...\" is not a valid Prometheus duration ..."` |
 | Invalid K8s label on `serviceMonitor.labels`/`prometheusRule.labels` | `"monitoring.serviceMonitor.labels key \"k\" is not a valid Kubernetes label key: ..."` / `"...labels[\"k\"] value \"v\" is not a valid Kubernetes label value: ..."` |
 
 These are validated because the reconciler copies them verbatim onto the ServiceMonitor/PrometheusRule; the Prometheus Operator / API server would otherwise reject them at apply time, leaving monitoring silently broken.
+
+**`=` and `,` are legal inside `metricLabels` values.** The constraint is TOML compatibility, and the operator quotes values before writing them, so only the *key* charset is restricted (`^[A-Za-z0-9_-]+$`, `aerospikecluster_webhook.go:44`) and only control characters are rejected in values (`:1964-1978`). `metricLabels: {env: "a=b,c"}` is accepted; `metricLabels: {"env.tier": "prod"}` is not.
 
 ### MaxUnavailable Validation
 
@@ -173,9 +195,17 @@ These are validated because the reconciler copies them verbatim onto the Service
 | Rule | Error Message |
 |------|--------------|
 | More than 1 operation | `"only one operation can be specified at a time"` |
-| ID length outside 1-20 chars | `"operation id must be 1-20 characters"` |
-| Invalid `kind` | `"operation kind must be one of: WarmRestart, PodRestart"` |
+| ID length outside 1-20 chars | `"operation id \"ID\" must be 1-20 characters"` |
+| Duplicate operation id | `"duplicate operation id \"ID\""` |
 | Change during InProgress (incl. changing `podList`) | `"cannot change operations while operation \"ID\" is InProgress"` |
+
+An invalid `kind` is **not** a webhook error. `OperationKind` carries `+kubebuilder:validation:Enum=WarmRestart;PodRestart` (`api/v1alpha1/aerospikecluster_types.go:119-127`), so the API server rejects it from the CRD's OpenAPI schema before the webhook runs, with the standard shape:
+
+```
+spec.operations[0].kind: Unsupported value: "Foo": supported values: "WarmRestart", "PodRestart"
+```
+
+That message has no `validation failed: ` prefix — it is not produced by ACKO.
 
 ### Template / Overrides Validation
 
@@ -194,7 +224,9 @@ The **AerospikeClusterTemplate CR** has its own admission webhook (registered in
 | Rule | Error Message |
 |------|--------------|
 | overrides without templateRef | `"spec.overrides can only be set when spec.templateRef is specified"` |
-| `templateRef` added / removed / changed on update | `"spec.templateRef is immutable: cannot add/remove/change templateRef ..."` — create a new cluster instead |
+| `templateRef` **added** on update | `"spec.templateRef is immutable: cannot add templateRef to an existing cluster; create a new cluster that references the template"` |
+| `templateRef` **removed** on update | `"spec.templateRef is immutable: cannot remove templateRef from a cluster that was created with one (was \"name\")"` |
+| `templateRef` **changed** on update | `"spec.templateRef is immutable: cannot change templateRef from \"a\" to \"b\"; create a new cluster instead"` |
 
 ---
 

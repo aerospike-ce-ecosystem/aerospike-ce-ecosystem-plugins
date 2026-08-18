@@ -8,9 +8,11 @@ The operator converts CRD YAML fields to aerospike.conf syntax automatically.
 | `logging: [{ name: /path }]` | `logging { file /path { ... } }` |
 | `storage-engine: { type: memory, data-size: N }` | `storage-engine memory { data-size N }` |
 | `storage-engine: { type: device, file: ... }` | `storage-engine device { file ... }` |
-| `security: {}` | `security { }` |
+| `security: {...}` | *(nothing — the section is skipped)* |
 
 **Key rule**: Size values in `aerospikeConfig` are always integer bytes. The operator passes them directly to the generated config file.
+
+**The `security` section produces no output.** The config generator matches `security` and `continue`s without writing anything (`internal/configgen/generator.go:59-60`), and `internal/configgen/generator_test.go:132-142,395-410` asserts the rendered file contains no `security` stanza. This holds for `security: {}` and for `security: {enable-security: true}` alike — the webhook accepts those two CE keys (`aerospikecluster_webhook.go:796,912`) but nothing carries them into `aerospike.conf`.
 
 ---
 
@@ -35,9 +37,11 @@ The ACKO operator automatically sets these values when they are omitted from the
 
 ```yaml
 aerospikeConfig:
-  security: {}                         # Enables authentication + RBAC
+  security: {}                         # Accepted by the webhook, but NOT rendered
+                                       # into aerospike.conf (see mapping table above)
 
-aerospikeAccessControl:
+aerospikeAccessControl:                # This is what drives users/roles — the
+                                       # ACL reconciler applies them over the wire
   users:
     - name: admin                      # Required: at least one admin
       secretName: aerospike-admin-secret

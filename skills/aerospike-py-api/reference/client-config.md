@@ -19,14 +19,16 @@ Import from `aerospike_py.types`. Used by `aerospike.client(config)` and `AsyncC
 | user | str | None | Username for authentication |
 | password | str | None | Password for authentication |
 | timeout | int | 30000 | Connection timeout (ms) |
-| idle_timeout | int | 55000 | Idle connection timeout (ms) |
-| max_conns_per_node | int | 300 | Max connections per node |
+| idle_timeout | int | 30000 | Idle connection timeout (ms). Keep it below the server's `proto-fd-idle-ms` |
+| max_conns_per_node | int | 256 | Max connections per node |
 | min_conns_per_node | int | 0 | Min connections per node (pre-warm) |
 | conn_pools_per_node | int | 1 | Connection pools per node |
 | tend_interval | int | 1000 | Cluster tend interval (ms) |
 | use_services_alternate | bool | false | Use alternate service addresses |
 | max_concurrent_operations | int | 0 (disabled) | Max in-flight operations (backpressure via Tokio Semaphore). Raises `BackpressureError` when exceeded. |
 | operation_queue_timeout_ms | int | 0 (no timeout) | Timeout (ms) for waiting on an operation permit when backpressure is active |
+
+Defaults come from `aerospike-core`'s `ClientPolicy::default()` (pinned at `2.0.0` by `rust/Cargo.toml:31`), except `auth_mode`: the wrapper only touches it when a `user` is supplied, and then falls back to `AuthMode::Internal` (`rust/src/policy/client_policy.rs:32-58`), so `AUTH_INTERNAL` is the user-visible default even though the core default is `AuthMode::None`.
 
 ### Basic Example
 
@@ -87,12 +89,14 @@ async with aerospike.AsyncClient(config) as client:              # async
 ```python
 config: ClientConfig = {
     "hosts": [("127.0.0.1", 3000)],
-    "max_conns_per_node": 300,
-    "min_conns_per_node": 10,
-    "conn_pools_per_node": 1,
-    "idle_timeout": 55000,
+    "max_conns_per_node": 300,      # explicit override; default is 256
+    "min_conns_per_node": 10,       # explicit override; default is 0
+    "conn_pools_per_node": 1,       # already the default
+    "idle_timeout": 55000,          # explicit override; default is 30000
 }
 ```
+
+Every value above except `conn_pools_per_node` is a deliberate override, not a restatement of the default — see the [ClientConfig](#clientconfig) table for what you get if you omit them.
 
 - **max_conns_per_node**: Match to expected concurrent requests per node.
 - **min_conns_per_node**: Set > 0 to avoid cold-start latency spikes.

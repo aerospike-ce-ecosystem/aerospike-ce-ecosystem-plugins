@@ -12,7 +12,7 @@ Complete field reference for the AerospikeCluster Custom Resource.
 | `spec.image` | string | Yes | Aerospike CE container image (e.g., `aerospike:ce-8.1.1.1`) |
 | `spec.paused` | bool | No | Set `true` to pause all reconciliation |
 | `spec.enableDynamicConfigUpdate` | bool | No | Apply config changes without pod restart |
-| `spec.rollingUpdateBatchSize` | int/string | No | Pods to restart per batch (default: 1, or "25%") |
+| `spec.rollingUpdateBatchSize` | int | No | Pods to restart per batch (default: 1). Integer only, minimum 1 — percentages are rejected by the API server. For `"25%"` use `spec.rackConfig.rollingUpdateBatchSize`, which takes precedence when set. |
 | `spec.disablePDB` | bool | No | Set `true` to skip PodDisruptionBudget creation |
 | `spec.maxUnavailable` | int/string | No | PDB maxUnavailable value (default: 1) |
 | `spec.templateRef.name` | string | No | Reference an AerospikeClusterTemplate (immutable after creation) |

@@ -25,7 +25,7 @@ kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"size":5}}'
 kubectl patch asc <name> -n <ns> --type=merge -p '{"spec":{"image":"aerospike:ce-8.1.1.1"}}'
 ```
 
-`RollingRestart` → `Completed`. Batch control: `spec.rollingUpdateBatchSize` (int or `"25%"`), per-rack override `rackConfig.rollingUpdateBatchSize`. Besides image/static config, editing `spec.podService` or `spec.aerospikeNetworkPolicy` also rolls pods (pod-spec hash).
+`RollingRestart` → `Completed`. Batch control: `spec.rollingUpdateBatchSize` (**int only**, min 1), per-rack override `rackConfig.rollingUpdateBatchSize` (int **or** `"25%"`, and it wins when set). Besides image/static config, editing `spec.podService` or `spec.aerospikeNetworkPolicy` also rolls pods (pod-spec hash).
 
 ## 3. Dynamic Config Update — 2-Phase Commit (ops ref §2)
 
@@ -36,7 +36,7 @@ Set `spec.enableDynamicConfigUpdate: true`, then patch the config value. The ope
 - **Removing** a key always forces a rolling restart (revert-to-default is not expressible as `set-config`). `replication-factor` (and legacy `memory-size`) are never dynamic — they cold-restart.
 - **ConfigDegraded** (apply AND rollback both failed): reconciliation **halts** with `ConfigDegradedSkip` Warning events (~60s requeue) until you intervene — revert the offending value, then cold-restart pods / reset the phase. Do NOT toggle `enableDynamicConfigUpdate`. Full recovery flow: `acko-debugging` skill.
 
-Common dynamic params: `proto-fd-max`, `max-record-size`, `stop-writes-sys-memory-pct`, `evict-used-pct`, `evict-tenths-pct`, `nsup-period`.
+Common dynamic params: `proto-fd-max`, `stop-writes-sys-memory-pct`, `nsup-period`, `default-ttl`, `migrate-sleep`. **`max-record-size`, `evict-used-pct` and `evict-tenths-pct` are NOT in the operator's allowlist** — editing them cold-restarts the cluster. The allowlist is `internal/configdiff/dynamic_params.go`; anything absent from it is classified static.
 
 ## 4. Warm / Cold Restart — spec.operations (ops ref §3)
 

@@ -66,9 +66,11 @@ spec:
       proto-fd-max: 20000               # Dynamic parameter
     namespaces:
       - name: test
-        evict-used-pct: 70              # Dynamic parameter (CE 8.1)
-        stop-writes-sys-memory-pct: 90  # Dynamic parameter (CE 8.1)
+        stop-writes-sys-memory-pct: 90  # Dynamic parameter
+        nsup-period: 120                # Dynamic parameter
 ```
+
+The operator's allowlist is `internal/configdiff/dynamic_params.go`; `IsDynamic(path)` decides per changed key, and **anything not on the list is classified static and cold-restarts** (`internal/configdiff/diff.go:145,195`). Notably `evict-used-pct`, `evict-tenths-pct` and `max-record-size` are *not* on it, so editing them rolls the cluster even with `enableDynamicConfigUpdate: true`.
 
 The operator applies dynamic changes via 2-phase commit (April 2026+):
 
@@ -123,10 +125,12 @@ status:
 
 ```yaml
 spec:
-  rollingUpdateBatchSize: 1             # Global (integer or "25%")
+  rollingUpdateBatchSize: 1             # Global — INTEGER only (min 1); "25%" is rejected
   rackConfig:
-    rollingUpdateBatchSize: "50%"       # Per-rack override
+    rollingUpdateBatchSize: "50%"       # Per-rack override — int OR percentage string
 ```
+
+Only the rack-level field accepts a percentage: `spec.rollingUpdateBatchSize` is `*int32` with `+kubebuilder:validation:Minimum=1` (`api/v1alpha1/aerospikecluster_types.go:261-265`), so a percentage string is rejected by the API server against the CRD schema before the webhook ever runs. `rackConfig.rollingUpdateBatchSize` is `*intstr.IntOrString` (`api/v1alpha1/types_rack.go:48-52`) and takes precedence over the global value whenever it is set (`internal/controller/reconciler_restart.go:645-652`).
 
 ### What triggers a rolling (cold) restart
 
