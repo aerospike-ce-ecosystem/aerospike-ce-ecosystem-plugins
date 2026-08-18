@@ -27,6 +27,7 @@ Per-release notes are also auto-published to [GitHub Releases](https://github.co
 
 ### Removed
 
+- Deleted the three label-triggered agent workflows — `agent-implement.yml`, `issue-planner.yml`, and `pr-reviewer.yml`. `agent-implement.yml` read an implementation plan from any issue comment containing an `<!-- agent-plan-start -->` marker, with no check on the comment's author, and then followed it with `contents`/`issues`/`pull-requests: write`, a PAT (`secrets.GH_AW_GITHUB_TOKEN`), and `--dangerously-skip-permissions`; anyone able to comment on an issue could plant that marker. `issue-planner.yml` interpolated `${{ github.event.issue.title }}` straight into its prompt block. All three ran with the same PAT and `--dangerously-skip-permissions`, so their `permissions:` blocks did not bound what `gh` could do. None had ever executed in this repository — across 137 triggered runs each, every one was skipped by its `if:` gate because the trigger labels (`agent`, `plan-complete`, `needs-review`) do not exist here, and `pr-reviewer.yml` had never triggered at all. This supersedes the earlier "CI workflow prompts now reflect the current nine-skill layout" note above for these three files. Tracked in aerospike-ce-ecosystem/project-hub#158.
 - Deleted the unused `.mcp.json` placeholder left by the retired `acm-mcp-init` MCP integration.
 
 ## [1.4.4] - 2026-05-17
