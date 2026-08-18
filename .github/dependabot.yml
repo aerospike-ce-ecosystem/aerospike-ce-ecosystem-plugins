@@ -1,0 +1,22 @@
+# Dependency update PRs. Added alongside CodeQL and dependency-review
+# because this repository had no dependency scanning of any kind.
+# See aerospike-ce-ecosystem/project-hub#160.
+version: 2
+updates:
+  # the only Python manifest
+  - package-ecosystem: "pip"
+    directory: "/skills/acko-e2e-test/e2e_pytest"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      pip-deps:
+        patterns: ["*"]
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions-deps:
+        patterns: ["*"]
