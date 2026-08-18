@@ -9,6 +9,10 @@ Per-release notes are also auto-published to [GitHub Releases](https://github.co
 
 ## [Unreleased]
 
+### Added
+
+- `tools/claim-check` — a CI check that extracts factual claims from `skills/` and verifies them against pinned checkouts of the three source repos, plus a `Claim Check` workflow that runs it on every PR touching `skills/` and weekly on a schedule. Fourteen rules cover webhook error strings, CRD field paths, event reasons, phases, conditions, the dynamic-parameter allowlist, Helm values keys, `acko.io`/`aerospike.io` label keys, `aerospike-py` constant name+value pairs, client methods and exception classes, and the `ackoctl` cobra command tree and flags. It is syntactic, not semantic: it catches renames, typos and invented identifiers, and cannot tell you whether a documented procedure works. Coverage and its limits are stated in `tools/claim-check/README.md`; `--coverage` prints the figure on every run.
+
 ### Changed
 
 - The `aerospike-py-api` skill now documents the `.result_code: int` attribute on Aerospike exceptions. Server errors carry the actual wire code, such as `FailForbidden`=22, while client-side errors use the `-1` `CLIENT_SIDE_RESULT_CODE` sentinel. Applications can use this structured value instead of parsing error messages (aerospike-py ADR-0027, PR #413).

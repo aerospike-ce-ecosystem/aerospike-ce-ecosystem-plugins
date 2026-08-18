@@ -1,0 +1,29 @@
+{
+  "_comment": [
+    "Source repositories the skills document, and the ref each claim was last",
+    "verified against. Bump a ref only together with a run of check_claims.py",
+    "that passes at that ref -- the ref is a statement that the skills matched",
+    "that commit, not just a pointer at something newer.",
+    "",
+    "Set CLAIM_CHECK_SRC_<KEY> to reuse a local checkout instead of cloning,",
+    "e.g. CLAIM_CHECK_SRC_ACKO=/path/to/aerospike-ce-kubernetes-operator.",
+    "A local checkout is used as-is; its ref is NOT checked out or verified."
+  ],
+  "sources": {
+    "acko": {
+      "repo": "https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator.git",
+      "ref": "7cc48da957f5f407434ebb42c66fdc47c0bf9fd0",
+      "describes": "aerospike-ce-kubernetes-operator"
+    },
+    "aerospike_py": {
+      "repo": "https://github.com/aerospike-ce-ecosystem/aerospike-py.git",
+      "ref": "5db458d5686a9a0a8dfade844726eb20eaeb45ee",
+      "describes": "aerospike-py"
+    },
+    "ackoctl": {
+      "repo": "https://github.com/aerospike-ce-ecosystem/ackoctl.git",
+      "ref": "ad27c3c854abb57fa876631e6f62e0b24a5e54e3",
+      "describes": "ackoctl"
+    }
+  }
+}
