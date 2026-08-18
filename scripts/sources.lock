@@ -1,0 +1,17 @@
+# Pinned source checkouts for scripts/verify_skill_claims.py.
+#
+# Every claim the checker verifies is checked against THESE commits, not against
+# whatever the source repos happen to be at today. Pinning is the point: an
+# unpinned check silently changes meaning when upstream moves, and a green run
+# would stop being evidence of anything.
+#
+# To adopt upstream changes: bump a SHA here, re-run the checker, and fix (or
+# consciously accept) whatever it reports. That turns every upstream sync into
+# an explicit, reviewable commit instead of background drift.
+#
+# Format: <name> <git-url> <full-40-char-sha>
+
+aerospike-ce-kubernetes-operator https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator.git 1612083e4e2e76eafc4f975d593dd3145cc74c5e
+ackoctl https://github.com/aerospike-ce-ecosystem/ackoctl.git ad27c3c854abb57fa876631e6f62e0b24a5e54e3
+aerospike-py https://github.com/aerospike-ce-ecosystem/aerospike-py.git 5db458d5686a9a0a8dfade844726eb20eaeb45ee
+aerospike-cluster-manager https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager.git fc71b8ce2745777ba5d3420553a020298d08addc
