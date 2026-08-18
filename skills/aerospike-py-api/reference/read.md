@@ -189,6 +189,27 @@ Import: `from aerospike_py import predicates`
 
 Geo predicate args: `geo_within_geojson_region(bin, geojson_str)`, `geo_within_radius(bin, lat, lng, radius_m)`, `geo_contains_geojson_point(bin, geojson_str)`. (Not yet supported — see note above.)
 
+### Partition filters — scoping a query to a partition range
+
+Pass a `PartitionFilter` handle through the query policy to scope a query or scan to part of the 4096-partition keyspace. Used for sharding a full scan across workers.
+
+```python
+from aerospike_py import partition_filter_all, partition_filter_by_id, partition_filter_by_range
+
+pf = partition_filter_by_range(0, 1024)          # partitions [0, 1024)
+records = client.query("test", "users").results(policy={"partition_filter": pf})
+```
+
+| Builder | Scope |
+|---|---|
+| `partition_filter_all()` | All 4096 partitions — same as omitting `partition_filter` |
+| `partition_filter_by_id(partition_id)` | One partition, `[0, 4095]` |
+| `partition_filter_by_range(begin, count)` | `count` partitions from `begin`; `begin + count <= 4096`. A `count` of `0` is legal and yields an empty filter. Overflowing 4096 raises `ValueError`. |
+
+`PartitionFilter` is an opaque handle with no public constructor — build it with one of the three functions above, all exported from the top-level module.
+
+Reusing one handle across two `results()` calls is safe. The underlying `aerospike_core::PartitionFilter` carries mutable cursor state, which would make the second call resume where the first stopped, but aerospike-py clones the inner filter when it parses the policy, so your handle keeps its original range.
+
 ---
 
 ## Expression Filters

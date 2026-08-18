@@ -249,7 +249,7 @@ Every server result code maps to its real proto.h wire code (there is no `-1` ca
 
 ### Structured error codes — `exc.result_code`
 
-Every Aerospike exception carries an integer **`.result_code`** attribute (base `AerospikeError` and every subclass) — branch on it instead of parsing the `AEROSPIKE_ERR (<code>)` message string. Server errors (`ServerError`, and batch `BatchError` / `BatchLastError`) carry the real wire result code on the instance (e.g. `FailForbidden`=22, `RecordNotFound`=2, `RecordExistsError`=5 — the same codes as the table above). Client-side errors — `ClusterError` (connection / invalid node / no-more-connections), `AerospikeTimeoutError`, `InvalidArgError`, and the `ClientError` catch-all — carry the sentinel **`-1`** (`CLIENT_SIDE_RESULT_CODE`, mirroring the C client's `AEROSPIKE_ERR_CLIENT`); the class-level default is also `-1`. The message string still embeds `AEROSPIKE_ERR (<code>)` as before. (ADR-0027)
+Every Aerospike exception carries an integer **`.result_code`** attribute (base `AerospikeError` and every subclass) — branch on it instead of parsing the `AEROSPIKE_ERR (<code>)` message string. Server errors (`ServerError`, and batch `BatchError` / `BatchLastError`) carry the real wire result code on the instance (e.g. `FailForbidden`=22, `RecordNotFound`=2, `RecordExistsError`=5 — the same codes as the table above). Client-side errors — `ClusterError` (connection / invalid node / no-more-connections), `AerospikeTimeoutError`, `InvalidArgError`, and the `ClientError` catch-all — carry the sentinel **`-1`**; the class-level default is also `-1`. (The Rust source names that sentinel `CLIENT_SIDE_RESULT_CODE`, `rust/src/errors.rs:33`, mirroring the C client's `AEROSPIKE_ERR_CLIENT` — it is **not** registered on the Python module, so compare against the literal `-1`, not `aerospike_py.CLIENT_SIDE_RESULT_CODE`.) The message string still embeds `AEROSPIKE_ERR (<code>)` as before. (ADR-0027)
 
 ```python
 from aerospike_py import ServerError, AerospikeError
@@ -276,6 +276,7 @@ All exceptions are importable both from `aerospike_py` directly (e.g. `from aero
 AerospikeError
 +-- ClientError
 |   +-- BackpressureError
+|   +-- RustPanicError
 +-- ClusterError
 +-- InvalidArgError
 +-- AerospikeTimeoutError
@@ -299,4 +300,18 @@ AerospikeError
     |   +-- QueryAbortedError
     +-- AdminError
     +-- UDFError
+```
+
+### `RustPanicError` — a caught native panic
+
+A `ClientError` subclass raised when a Rust panic was caught at a client API boundary. The Python process survives; the operation did not complete.
+
+The common trigger is a record carrying a language-specific blob particle type that `aerospike-core` 2.0.0 cannot decode — `PYTHON_BLOB` (8), `JAVA_BLOB` (5) and friends, typically written by an older client against the same namespace. It is per-record, so catch it inside a scan or batch-read loop to skip the offending record rather than losing the whole request:
+
+```python
+for br in results.batch_records:
+    try:
+        use(br.record.bins)
+    except aerospike_py.RustPanicError:
+        skipped.append(br.key)          # legacy blob particle; move on
 ```
