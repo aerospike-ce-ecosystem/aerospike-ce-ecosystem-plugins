@@ -138,9 +138,21 @@ jobs:
             exit 0
           fi
 
-          if gh pr view "${BRANCH}" --json number >/dev/null 2>&1; then
-            gh pr edit "${BRANCH}" --title "chore(release): sync plugin.json to ${MANIFEST_VERSION}" || true
-            echo "::warning::plugin.json on main is stale; updated the open ${BRANCH} PR to ${MANIFEST_VERSION}."
+          # `gh pr view <branch>` matches a PR in ANY state, merged ones
+          # included. Once the first sync PR was merged, every later release
+          # took the `edit` path: it retitled the merged PR and opened nothing,
+          # so no open PR existed for anyone to merge and the manifest stayed
+          # behind the tag (v1.7.1 shipped with plugin.json still at 1.7.0).
+          # Scope the lookup to OPEN PRs on this head branch, which is the only
+          # state `gh pr edit` can usefully act on.
+          # `|| true` because the step runs under `bash -e`: a transient gh
+          # failure must fall through to `gh pr create` (harmless if a PR
+          # already exists) rather than abort before any PR is opened.
+          PR="$(gh pr list --head "${BRANCH}" --state open --json number --jq '.[0].number // empty' || true)"
+
+          if [ -n "${PR}" ]; then
+            gh pr edit "${PR}" --title "chore(release): sync plugin.json to ${MANIFEST_VERSION}" || true
+            echo "::warning::plugin.json on main is stale; updated the open ${BRANCH} PR #${PR} to ${MANIFEST_VERSION}."
           else
             gh pr create --base main --head "${BRANCH}" \
               --title "chore(release): sync plugin.json to ${MANIFEST_VERSION}" \
