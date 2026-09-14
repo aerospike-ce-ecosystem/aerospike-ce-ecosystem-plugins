@@ -154,7 +154,11 @@ jobs:
             gh pr edit "${PR}" --title "chore(release): sync plugin.json to ${MANIFEST_VERSION}" || true
             echo "::warning::plugin.json on main is stale; updated the open ${BRANCH} PR #${PR} to ${MANIFEST_VERSION}."
           else
-            gh pr create --base main --head "${BRANCH}" \
+            # Branch on the real outcome: when the `gh pr list` lookup above
+            # failed transiently while an open PR already existed, `gh pr create`
+            # exits non-zero with "already exists" and no PR was opened — saying
+            # so beats printing a success message that is simply untrue.
+            if gh pr create --base main --head "${BRANCH}" \
               --title "chore(release): sync plugin.json to ${MANIFEST_VERSION}" \
               --body "$(printf '%s\n' \
                 "\`.claude-plugin/plugin.json\` records the plugin version that Claude Code reads at install time, so it has to match the release tag." \
@@ -163,8 +167,11 @@ jobs:
                 "" \
                 "Merging it is the whole fix; the next release force-updates this same branch rather than opening another PR." \
                 "" \
-                "Refs #88.")" || true
-            echo "::warning::plugin.json on main is stale; opened a ${BRANCH} PR for ${MANIFEST_VERSION}."
+                "Refs #88.")"; then
+              echo "::warning::plugin.json on main is stale; opened a ${BRANCH} PR for ${MANIFEST_VERSION}."
+            else
+              echo "::warning::plugin.json on main is stale; could not open a ${BRANCH} PR for ${MANIFEST_VERSION} — an open PR on ${BRANCH} probably already exists; check and merge it."
+            fi
           fi
           exit 0
 

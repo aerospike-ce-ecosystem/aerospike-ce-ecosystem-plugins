@@ -114,7 +114,7 @@ aerospike-py delegates the retry loop to `aerospike-core` (pinned in `rust/Cargo
 | aerospike-core | retry cap in `src/commands/single_command.rs` | `max_retries: 0` | `max_retries: N > 0` |
 |---|---|---|---|
 | 2.0.0 (pinned today) | `if policy.max_retries() > 0 && iterations > policy.max_retries()` (:112) | cap disabled — every network error is re-sent until `total_timeout` expires | at most N attempts |
-| 2.2.0 | `let effective_attempt = policy.max_retries() + 1;` … `if iterations > effective_attempt` (:106, :112) | exactly one attempt | at most N+1 attempts |
+| 2.2.0 | `let effective_attempt = policy.max_retries() + 1;` … `if iterations > effective_attempt` (:106, :113) | exactly one attempt | at most N+1 attempts |
 
 True on both: only network errors are retried, writes and `operate()` report `can_retry() == true`, and every retry is bounded by `total_timeout` — so `max_retries: 0` together with `total_timeout: 0` ("no limit") is an unbounded retry loop on 2.0.0. Never combine those two.
 
