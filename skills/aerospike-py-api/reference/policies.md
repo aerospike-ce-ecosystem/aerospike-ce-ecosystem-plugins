@@ -40,7 +40,7 @@ Used by: `put()`, `remove()`, `touch()`, `append()`, `prepend()`, `increment()`,
 |-----|------|---------|-------------|
 | socket_timeout | int | 30000 | Socket timeout (ms) |
 | total_timeout | int | 1000 | Total transaction timeout (ms) |
-| max_retries | int | 0 | Max retry attempts |
+| max_retries | int | 0 | Attempt budget. `0` is **not** "no retries" on aerospike-core 2.0.0 — it retries network errors until `total_timeout`. See [client-config.md](./client-config.md). |
 | sleep_between_retries | int | 0 | Sleep between retries (ms) |
 | durable_delete | bool | false | Durable delete (Enterprise) |
 | key | int | POLICY_KEY_DIGEST | Key send policy (`POLICY_KEY_*`) |

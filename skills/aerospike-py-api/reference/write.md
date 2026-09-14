@@ -201,7 +201,7 @@ except RecordGenerationError:
 |-----|------|-------------|
 | `socket_timeout` | int | Socket idle timeout (ms) |
 | `total_timeout` | int | Total transaction timeout (ms) |
-| `max_retries` | int | Maximum retry attempts |
+| `max_retries` | int | Attempt budget. `0` is **not** "no retries" on aerospike-core 2.0.0 — it retries network errors until `total_timeout`. See [client-config.md](./client-config.md). |
 | `sleep_between_retries` | int | Sleep between retries (ms) |
 | `durable_delete` | bool | Durable delete (requires Enterprise) |
 | `key` | int | Key send policy |

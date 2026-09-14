@@ -171,11 +171,21 @@ These are validated because the reconciler copies them verbatim onto the Service
 
 ### MaxUnavailable Validation
 
+A budget that permits full disruption is **rejected at admission** — it used to be a `ValidationWarning`, which appears once in `kubectl apply` output and then never again while the consequence surfaces later during an unrelated node drain.
+
 | Rule | Error Message |
 |------|--------------|
 | `maxUnavailable` malformed (negative int, non-percentage string) | error contains `"maxUnavailable"` |
+| int `maxUnavailable` >= the pod count it protects | `"spec.maxUnavailable (N) is >= the pod count it protects (M); a PodDisruptionBudget that allows every pod to be evicted at once is not a budget. Use a value below M, or set spec.disablePDB to opt out of disruption protection deliberately"` |
+| percentage `maxUnavailable` >= `100%` | `"spec.maxUnavailable (100%) allows 100% disruption; a PodDisruptionBudget that allows every pod to be evicted at once is not a budget. Use a value below 100%, or set spec.disablePDB to opt out of disruption protection deliberately"` |
+| per-rack budget >= that rack's pod count | same two messages with the field named `spec.rackConfig.racks[id=N].maxUnavailable`, e.g. `"spec.rackConfig.racks[id=1].maxUnavailable (2) is >= the pod count it protects (2); a PodDisruptionBudget that allows every pod to be evicted at once is not a budget. Use a value below 2, or set spec.disablePDB to opt out of disruption protection deliberately"` |
 
-(Structural rejection at admission, in addition to the non-blocking "no disruption protection" warning below. Skipped when size is deferred to a templateRef.)
+Notes:
+
+- The rack pod count mirrors the reconciler's rack sizing: `spec.size` split evenly across `spec.rackConfig.racks[]`, remainder to the lowest-indexed racks. A 5-node, 3-rack cluster is 2/2/1, so `racks[id=3].maxUnavailable: 1` is rejected while `racks[id=1].maxUnavailable: 1` is fine.
+- Precedence for the PDB the reconciler writes: `spec.rackConfig.racks[].maxUnavailable` > `spec.maxUnavailable` > the default.
+- **Default when neither is set: replication-factor − 1, floored at 1** (1 for `replication-factor: 2`, 2 for `replication-factor: 3`), computed from the rack's effective `aerospikeConfig`.
+- Both checks are skipped when `spec.size` is `0` and `spec.templateRef` is set — the size arrives later from the resolved template.
 
 ### Operations Validation
 
@@ -219,7 +229,6 @@ These produce `ValidationWarning` events but do not reject the CR.
 | Exporter image `latest` or no tag | Use an explicit version tag |
 | `data-in-memory=true` | Memory usage may double (data cached in RAM + on disk) |
 | `rollingUpdateBatchSize > spec.size` | All pods may restart simultaneously (suppressed when size deferred to templateRef) |
-| `maxUnavailable >= spec.size` or `100%` | PDB provides no disruption protection (suppressed when size deferred to templateRef) |
 | hostPath volume used | Not recommended for production; data is node-bound |
 | cascadeDelete on non-PV volume | Has no effect on emptyDir or hostPath volumes |
 | No PV for work-directory | Data loss possible on pod restart |

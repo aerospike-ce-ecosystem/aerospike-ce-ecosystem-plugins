@@ -211,6 +211,25 @@ def acm_routes(root: Path) -> set[str]:
     return expanded
 
 
+def acm_info_verbs(root: Path) -> dict[str, set[str]]:
+    """The two asinfo verb allowlists cluster-manager enforces server-side.
+
+    Returns ``{"read": ..., "write": ...}``. An unlisted verb is not a typo the
+    user notices: cluster-manager answers 400 and ackoctl exits 4, so a
+    documented probe naming one fails on every single run.
+    """
+    src = _read(root / "api/src/aerospike_cluster_manager_api/info_verbs.py")
+    out: dict[str, set[str]] = {}
+    for const, key in (("READ_ONLY_INFO_VERBS", "read"), ("WRITE_INFO_VERBS", "write")):
+        m = re.search(rf"{const}: frozenset\[str\] = frozenset\(\s*\{{(.*?)\n    \}}", src, re.S)
+        if m:
+            out[key] = set(re.findall(r'"([a-z0-9-]+)"', m.group(1)))
+    if not out.get("read"):
+        return {}
+    out.setdefault("write", set())
+    return out
+
+
 # A Go format verb: %d, %q, %T, %+v, %-10s, %%
 GO_VERB = re.compile(r"(%[-+ #0]*[\d.*]*[a-zA-Z%])")
 # Go concatenates adjacent literals across lines: `"a " +\n  "b"`. Fold those
@@ -408,6 +427,74 @@ def check_acm_routes(known: set[str], stats: Stats) -> list[Finding]:
     return out
 
 
+# An `--command` argument: quoted or bare, plus any `|`-joined alternatives the
+# reference pages use to offer a choice of probes.
+INFO_COMMAND = re.compile(
+    r"--command[=\s]+((?:'[^']*'|\"[^\"]*\"|[^\s|]+)(?:\s*\|\s*(?:'[^']*'|\"[^\"]*\"))*)"
+)
+INFO_VERB = re.compile(r"^([a-z][a-z0-9-]*)")
+
+
+def _iter_skill_commands():
+    """Skill lines with trailing-backslash continuations folded into one.
+
+    A multi-line invocation puts `--allow-write` on the first physical line and
+    `--command` on the second; checking physical lines would read the second as
+    a read-only call and report a write verb that is in fact correct.
+    """
+    for path in sorted(_walk(SKILLS_DIR, ".md")):
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        buf, start = "", 0
+        for i, line in enumerate(_read(path).splitlines(), 1):
+            if not buf:
+                start = i
+            if line.rstrip().endswith("\\"):
+                buf += line.rstrip()[:-1] + " "
+                continue
+            yield rel, start, buf + line
+            buf = ""
+        if buf:
+            yield rel, start, buf
+
+
+def check_acm_info_verbs(known: dict[str, set[str]], stats: Stats) -> list[Finding]:
+    """`--command '<verb>'` on an ackoctl info line against the ACM allowlists.
+
+    This is the `status` shape: a verb that reads like a plausible asinfo probe
+    (and is one, against a raw `asinfo -v`) but that cluster-manager has never
+    put on the read-only whitelist, so the documented diagnostic 400s.
+    """
+    out: list[Finding] = []
+    if not known:
+        return out
+    read_only, write_only = known["read"], known["write"]
+    for rel, ln, line in _iter_skill_commands():
+        if "ackoctl" not in line or line.lstrip().startswith("#"):
+            continue
+        allow_write = "--allow-write" in line
+        allowed = read_only | write_only if allow_write else read_only
+        for group in INFO_COMMAND.findall(line):
+            for raw in group.split("|"):
+                m = INFO_VERB.match(raw.strip().strip("'\""))
+                if not m:
+                    continue  # `CMD`, `<cmd>`, `...` — a placeholder, not a claim
+                verb = m.group(1)
+                stats.count("acm-info-verb")
+                if verb in allowed:
+                    continue
+                why = (
+                    f"not in WRITE_INFO_VERBS + READ_ONLY_INFO_VERBS ({sorted(write_only)} "
+                    "plus the read set)"
+                    if allow_write
+                    else f"not in READ_ONLY_INFO_VERBS; add --allow-write --yes only for {sorted(write_only)}"
+                )
+                out.append(Finding(
+                    rel, ln, "acm-info-verb", verb,
+                    f"cluster-manager rejects this verb with HTTP 400 (ackoctl exit 4): {why}",
+                ))
+    return out
+
+
 def check_event_reasons(known: set[str], stats: Stats) -> list[Finding]:
     """Event reasons in the first column of an "Event Reason" table.
 
@@ -596,6 +683,9 @@ COVERAGE — what this checker does and does not verify
                      constants.rs plus the Python-level modules
     acm-route        `/api/...` against cluster-manager routes, resolved through
                      each APIRouter prefix and both the /api and /api/v1 mounts
+    acm-info-verb    `--command '<verb>'` on an ackoctl info line against
+                     cluster-manager's READ_ONLY_INFO_VERBS (plus
+                     WRITE_INFO_VERBS when the line passes --allow-write)
     webhook-message  backticked, quoted messages in the ACKO error catalogues
                      against operator format strings, matched per-string
 
@@ -701,6 +791,7 @@ def main() -> int:
     run("ackoctl-flag", ackoctl_flags, check_ackoctl_flags, ACKOCTL)
     run("py-constant", py_constants, check_py_constants, PY)
     run("acm-route", acm_routes, check_acm_routes, ACM)
+    run("acm-info-verb", acm_info_verbs, check_acm_info_verbs, ACM)
     run("webhook-message", acko_message_patterns, check_webhook_messages, ACKO)
 
     if args.format == "json":

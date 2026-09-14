@@ -20,10 +20,12 @@ Then run discovery against the selected `CONN_ID`:
 ```bash
 ackoctl --context={ctx} cluster info <CONN_ID> -o yaml
 ackoctl --context={ctx} info <CONN_ID> --command='statistics'
-ackoctl --context={ctx} info <CONN_ID> --command='status'
+ackoctl --context={ctx} info <CONN_ID> --command='cluster-stable'
 ```
 
 Use `statistics` output to see `cluster_size`, `migration_status`, `stop_writes`, etc. across all nodes. `cluster info` already aggregates nodes, namespaces, sets and sindex counts.
+
+`ackoctl info` only transmits verbs on cluster-manager's read-only whitelist (`version`, `build`, `build-os`, `build-time`, `node`, `service`, `services`, `services-alumni`, `nodes`, `cluster-name`, `cluster-stable`, `cluster-generation`, `cluster-info`, `health-outliers`, `health-stats`, `namespaces`, `namespace`, `sets`, `sindex`, `statistics`, `latencies`, `udf-list`, `roster`, `racks`). Anything else — `status` included — is HTTP 400 (`command '<verb>' not in read-only whitelist`), which ackoctl reports as exit 4. For a liveness-style probe use `cluster-stable` or `build`; for `asinfo -v status` specifically, go through `kubectl exec` (Step 2).
 
 **K8s-plane status — prefer ackoctl** (cluster-manager started with `K8S_MANAGEMENT_ENABLED=true`):
 
@@ -93,7 +95,7 @@ Check for: Pending PVCs (StorageClass not found or no capacity), ImagePullBackOf
 **Prefer ackoctl** for data-plane probes:
 
 ```bash
-ackoctl --context={ctx} info <CONN_ID> --command='status'
+ackoctl --context={ctx} info <CONN_ID> --command='cluster-stable'
 ackoctl --context={ctx} info <CONN_ID> --command='statistics'
 ackoctl --context={ctx} info <CONN_ID> --command='namespace/<ns-name>'
 # Sample-record sanity check

@@ -285,10 +285,16 @@ spec:
 ```yaml
 spec:
   disablePDB: false                   # PDB enabled (default)
-  maxUnavailable: 1                   # Integer or "25%"
+  maxUnavailable: 1                   # Integer or "25%"; default is replication-factor - 1 (min 1)
+  rackConfig:
+    racks:
+      - id: 1
+        maxUnavailable: 1             # Per-rack override; one PDB is written per rack
   k8sNodeBlockList:
     - node-to-drain-01                # Block scheduling before draining
 ```
+
+The webhook **rejects** a budget that permits full disruption: an int >= the pod count it protects (cluster size, or that rack's share of it) or a percentage >= `100%`. Precedence is `racks[].maxUnavailable` > `spec.maxUnavailable` > the replication-factor default. To opt out of disruption protection on purpose, set `spec.disablePDB: true` — raising `maxUnavailable` to the pod count no longer works. Exact messages: [validation-rules.md](./validation-rules.md).
 
 ---
 
