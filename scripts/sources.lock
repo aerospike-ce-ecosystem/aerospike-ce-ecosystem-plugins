@@ -11,7 +11,7 @@
 #
 # Format: <name> <git-url> <full-40-char-sha>
 
-aerospike-ce-kubernetes-operator https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator.git 1612083e4e2e76eafc4f975d593dd3145cc74c5e
+aerospike-ce-kubernetes-operator https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator.git 500b4fcd45562bb307628f13fd2b82f2b181ac09
 ackoctl https://github.com/aerospike-ce-ecosystem/ackoctl.git ad27c3c854abb57fa876631e6f62e0b24a5e54e3
 aerospike-py https://github.com/aerospike-ce-ecosystem/aerospike-py.git 5db458d5686a9a0a8dfade844726eb20eaeb45ee
-aerospike-cluster-manager https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager.git fc71b8ce2745777ba5d3420553a020298d08addc
+aerospike-cluster-manager https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager.git 4b717d4c1f200d4ad49abd11046c91e86c88373f

@@ -39,9 +39,14 @@ Read-only. **Run `guide get` before any mutating command** — data-plane before
 | Verb | One-liner |
 |------|-----------|
 | `cluster info CONN_ID` | Nodes + namespaces + sets summary (raw map; use `-o json/yaml` for full payload). |
-| `cluster configure-namespace CONN_ID --name NS --param KEY=VAL [--param …]` | Patch dynamic-config knobs (`--param` repeatable, ≥1 required, duplicate keys rejected, `name` reserved). |
+| `cluster configure-namespace CONN_ID --name NS --param memorySize=BYTES \| replicationFactor=1-8 --yes` | Patch the only two knobs cluster-manager reads from this request (`--param` repeatable, ≥1 required, duplicate keys rejected, `name` reserved). |
 
-`configure-namespace` issues `asinfo set-config` — only **runtime-mutable** knobs apply; CE cannot create namespaces at runtime (they live in `aerospike.conf`, managed by ACKO).
+`configure-namespace` issues `asinfo set-config` — CE cannot create namespaces at runtime (they live in `aerospike.conf`, managed by ACKO).
+
+Two constraints the grammar above is not free to relax:
+
+- **Only `memorySize` (bytes) and `replicationFactor` (1–8) are accepted.** Any other `--param` key is rejected client-side with `--param "<key>" would be silently ignored: cluster-manager reads only memorySize and replicationFactor from this request` — the server's `CreateNamespaceRequest` declares no other field and would answer 200 having dropped it. For every other runtime knob use the asinfo passthrough: `ackoctl info CONN_ID --allow-write --yes --command 'set-config:context=namespace;id=NS;KEY=VAL'`.
+- **`--yes` is mandatory**, one knob or both: without it the command exits 1 with `confirmation required (--yes): configure-namespace mutates a live namespace on <target>`. Supplying only one of the two knobs is additionally hazardous — a cluster-manager without [the omitted-param fix](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/pull/478) substitutes its own default for the other (`memorySize=1073741824`, `replicationFactor=2`) and applies it to the running namespace. Read the current values with `ackoctl info CONN_ID --command 'namespace/NS'` first.
 
 ## `set` — set inspection + destructive ops
 
@@ -110,9 +115,17 @@ Read-only. **Run `guide get` before any mutating command** — data-plane before
 
 | Verb | One-liner |
 |------|-----------|
-| `info CONN_ID --command CMD [--command CMD …] [--node NODE] [--allow-write]` | Run asinfo verbs (`--command` non-empty, repeatable); fan-out when `--node` omitted; `--allow-write` bypasses the read-only whitelist. |
+| `info CONN_ID --command CMD [--command CMD …] [--node NODE] [--allow-write --yes]` | Run asinfo verbs (`--command` non-empty, repeatable); fan-out when `--node` omitted; `--allow-write` selects the write passthrough and **requires `--yes`**. |
 
-Read verbs run against the cluster-manager read-only whitelist by default; mutation verbs (`set-config:`, `recluster:`, …) require `--allow-write`. Always mediated by the workspace ACL.
+By default every command is checked against cluster-manager's read-only whitelist: `version`, `build`, `build-os`, `build-time`, `node`, `service`, `services`, `services-alumni`, `nodes`, `cluster-name`, `cluster-stable`, `cluster-generation`, `cluster-info`, `health-outliers`, `health-stats`, `namespaces`, `namespace`, `sets`, `sindex`, `statistics`, `latencies`, `udf-list`, `roster`, `racks`. Anything else — `status` included — is HTTP 400 (`command '<verb>' not in read-only whitelist; pass readOnly=false to allow`) and ackoctl exit 4.
+
+Three things gate the write passthrough, and all three have to hold:
+
+1. `--allow-write` without `-y/--yes` exits 1 client-side: `confirmation required (--yes): --allow-write forwards write verbs to <target>`.
+2. cluster-manager answers **403** (`asinfo write passthrough is disabled; set ACM_ALLOW_INFO_WRITE=true`) unless the API process was started with `ACM_ALLOW_INFO_WRITE=true`. That is a server deployment setting; no ackoctl flag turns it on.
+3. Only `set-config`, `recluster`, `log-set` and `jobs` are accepted on top of the read verbs, against a dedicated 5-per-minute budget (429 when exhausted). Destructive verbs — `truncate-namespace`, `truncate`, `sindex-delete`, `set-drop`, `roster-set`, `quiesce` — are deliberately excluded and return 400; use the typed verbs (`set truncate`, `index delete`) instead.
+
+Always mediated by the workspace ACL.
 
 ## `admin` — Aerospike Enterprise user + role management
 

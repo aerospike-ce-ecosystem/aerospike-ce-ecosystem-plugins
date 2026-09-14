@@ -105,7 +105,20 @@ config: ClientConfig = {
 |---------|---------------|
 | `socket_timeout` | 1-5s. Catches hung connections. |
 | `total_timeout` | Set based on SLA. Includes retries. |
-| `max_retries` | 2-3 for reads, 0 for writes (idempotency). |
+| `max_retries` | 2-3 for reads. For writes see the note below — do **not** assume `0` means "no retries". |
+
+#### `max_retries` is an attempt budget, and `0` is version-dependent
+
+aerospike-py delegates the retry loop to `aerospike-core` (pinned in `rust/Cargo.toml`), and the two releases in circulation read the field differently:
+
+| aerospike-core | retry cap in `src/commands/single_command.rs` | `max_retries: 0` | `max_retries: N > 0` |
+|---|---|---|---|
+| 2.0.0 (pinned today) | `if policy.max_retries() > 0 && iterations > policy.max_retries()` (:112) | cap disabled — every network error is re-sent until `total_timeout` expires | at most N attempts |
+| 2.2.0 | `let effective_attempt = policy.max_retries() + 1;` … `if iterations > effective_attempt` (:106, :112) | exactly one attempt | at most N+1 attempts |
+
+True on both: only network errors are retried, writes and `operate()` report `can_retry() == true`, and every retry is bounded by `total_timeout` — so `max_retries: 0` together with `total_timeout: 0` ("no limit") is an unbounded retry loop on 2.0.0. Never combine those two.
+
+aerospike-py's `WritePolicy` default is `max_retries: 0` (`rust/src/policy/write_policy.rs`). On core 2.0.0 that is **not** "no retries": a connection reset arriving after the server committed the write causes a re-send, which double-counts an `increment()` and duplicates an `append()`. For a non-idempotent write — `increment()`, `append()`, `prepend()`, `operate()` with an increment op, `apply()` — set the value explicitly instead of inheriting the default: `policy={"max_retries": 1}` on core 2.0.0, `policy={"max_retries": 0}` on 2.2.0. Both give a single attempt on their respective core; a bounded `total_timeout` is required either way.
 
 ### Batch Size Recommendations
 

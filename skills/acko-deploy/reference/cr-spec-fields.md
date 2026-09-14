@@ -14,7 +14,8 @@ Complete field reference for the AerospikeCluster Custom Resource.
 | `spec.enableDynamicConfigUpdate` | bool | No | Apply config changes without pod restart |
 | `spec.rollingUpdateBatchSize` | int | No | Pods to restart per batch (default: 1). Integer only — `*int32` with `Minimum=1`; percentages are accepted only at `rackConfig.rollingUpdateBatchSize` |
 | `spec.disablePDB` | bool | No | Set `true` to skip PodDisruptionBudget creation |
-| `spec.maxUnavailable` | int/string | No | PDB maxUnavailable value (default: 1) |
+| `spec.maxUnavailable` | int/string | No | Cluster-wide PDB budget. Default: replication-factor − 1, floored at 1. Rejected at admission when >= the pod count it protects (or >= `100%`) |
+| `spec.rackConfig.racks[].maxUnavailable` | int/string | No | Per-rack override of `spec.maxUnavailable`, validated against that rack's pod count |
 | `spec.templateRef.name` | string | No | Reference an AerospikeClusterTemplate (immutable after creation) |
 | `spec.overrides` | object | No | Override template fields (only with templateRef; contents are CE-validated like the inline spec) |
 | `spec.operations` | list | No | On-demand operations (WarmRestart, PodRestart) |

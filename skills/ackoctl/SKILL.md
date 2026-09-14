@@ -67,14 +67,16 @@ Exact flags/constraints per verb: [`./reference/commands.md`](./reference/comman
 | `index` | Secondary indexes (`numeric\|string\|geo2dsphere`) | `ackoctl index create C --namespace=test --set=users --bin=age --name=idx_age --type=numeric` |
 | `note` | Notes on sets/records (metaDB, per-connection) | `ackoctl note set update C --namespace=test --set=users --note='OPS-1234'` |
 | `k8s cluster` | ACKO CRs — list/get/reconcile/scale/pods/logs/events | `ackoctl k8s cluster scale aerospike/sample-cluster --size=5` |
-| `info` | Raw asinfo (read whitelist; mutations need `--allow-write`) | `ackoctl info C --command='statistics'` |
+| `info` | Raw asinfo (read whitelist; mutations need `--allow-write --yes` **and** server-side `ACM_ALLOW_INFO_WRITE=true`) | `ackoctl info C --command='statistics'` |
 | `admin` | EE users/roles (CE has no security → server-side failure, exit 5) | `ackoctl admin user create C --username=alice --password-stdin --roles=read-write` |
 | `udf` | Lua UDF modules (cluster-wide) | `ackoctl udf upload C --file=./sum.lua` |
 
 Notes that trip people up:
 
 - `k8s cluster` needs cluster-manager `K8S_MANAGEMENT_ENABLED=true` (else every subcommand 404s). Identifiers are `NAMESPACE/NAME` — quote them. `scale --size` is 1..8 (CE cap); scale-down needs `-y`, and ackoctl fails closed when the current size can't be read.
-- Destructive verbs (`delete`, `truncate`, `udf remove`, …) require `--yes`.
+- Destructive verbs (`delete`, `truncate`, `udf remove`, `cluster configure-namespace`, `info --allow-write`, …) require `--yes`.
+- `cluster configure-namespace` reads **only** `--param memorySize=<bytes>` and `--param replicationFactor=<1-8>`; any other key exits 1. Other runtime knobs go through `ackoctl info C --allow-write --yes --command 'set-config:context=namespace;id=<ns>;<key>=<value>'`.
+- `info --allow-write` is refused three ways: exit 1 without `--yes`, **403** unless cluster-manager runs with `ACM_ALLOW_INFO_WRITE=true`, and 400 for any verb outside `set-config` / `recluster` / `log-set` / `jobs` (5 requests per minute). `status` is not on the *read* whitelist either — use `cluster-stable` or `build`.
 - `record query` / `query exec` JSON flags (`--filter`, `--predicate`) must be non-empty JSON objects; barewords for `--value` stay strings.
 
 ## 5. Workspace ACL and auth

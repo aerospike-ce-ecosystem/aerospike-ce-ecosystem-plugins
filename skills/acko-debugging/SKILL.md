@@ -13,7 +13,7 @@ Prefer `ackoctl` for **both** planes — it goes through cluster-manager, the au
 
 ## Cluster selection & mutation safety
 
-Map the user's wording ("in dev", "prod-us") to an ackoctl context via `--context=<name>`; if ambiguous, list `ackoctl config view -o yaml` and ask (`{ctx}` = resolved context). **Confirm with the user before any state-mutating call** — `record put`/`delete`, `cluster configure-namespace`, `info --allow-write` (`set-config:`/`recluster:`), `index create`/`delete`, `k8s cluster scale`/`reconcile`, `udf upload`/`remove`, `admin user/role *`, `connection delete` (cascades attached notes). Prefer the no-side-effect read verbs for diagnosis: `k8s cluster get`, `info` (no `--allow-write`), `query exec`, `record get`.
+Map the user's wording ("in dev", "prod-us") to an ackoctl context via `--context=<name>`; if ambiguous, list `ackoctl config view -o yaml` and ask (`{ctx}` = resolved context). **Confirm with the user before any state-mutating call** — `record put`/`delete`, `cluster configure-namespace --yes` (only `--param memorySize=…` / `replicationFactor=…` are read by the server), `info --allow-write --yes` (`set-config:`/`recluster:`/`log-set:`/`jobs:` only, and 403 unless cluster-manager runs with `ACM_ALLOW_INFO_WRITE=true`), `index create`/`delete`, `k8s cluster scale`/`reconcile`, `udf upload`/`remove`, `admin user/role *`, `connection delete` (cascades attached notes). Prefer the no-side-effect read verbs for diagnosis: `k8s cluster get`, `info` (no `--allow-write`), `query exec`, `record get`.
 
 If `ackoctl` is not installed or no context is configured, tell the user: install via `curl -fsSL https://raw.githubusercontent.com/aerospike-ce-ecosystem/ackoctl/main/install.sh | sh`, then `ackoctl config set-context <name> --server=<url> --token=<jwt> --workspace-id=<ws>`; kubectl-only diagnosis can proceed meanwhile (data-plane probes go through `kubectl exec` instead). The `ackoctl` skill covers install and configuration in full.
 
@@ -21,7 +21,7 @@ If `ackoctl` is not installed or no context is configured, tell the user: instal
 
 Execute in order; stop and report as soon as the root cause is identified. Command blocks per step: [`./reference/playbook.md`](./reference/playbook.md).
 
-1. **Gather cluster overview** — pick/confirm a `CONN_ID` (`ackoctl connection list`); data plane via `ackoctl cluster info` + `info --command='statistics'|'status'`; K8s plane via `ackoctl k8s cluster get <ns>/<name> -o yaml` (phase, size, conditions, migration in one payload) and `k8s cluster events`.
+1. **Gather cluster overview** — pick/confirm a `CONN_ID` (`ackoctl connection list`); data plane via `ackoctl cluster info` + `info --command='statistics'` (`status` is **not** on cluster-manager's read-only whitelist — it is HTTP 400 / exit 4; use `cluster-stable` or `build` for a liveness probe); K8s plane via `ackoctl k8s cluster get <ns>/<name> -o yaml` (phase, size, conditions, migration in one payload) and `k8s cluster events`.
 2. **Branch on `status.phase`:**
    - `Error` → read `status.lastReconcileError` + recent events: config parse errors, image pull, quota, webhook failures. (The circuit breaker surfaces as `BackoffActive`, not `Error`.)
    - `BackoffActive` → inspect `ReconcileHealthy`. `True` = transient, auto-retries (backoff capped 5 min). `False/PermanentError` = validation/configgen/Secret error, **no retry**: fix root cause, then toggle `paused: true → null` or edit spec.
